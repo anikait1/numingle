@@ -12,7 +12,11 @@ import {
   GAME_TURN_EXPIRY_MILLISECONDS,
   USER_HASH_PREFIX,
   GameStatus,
-  GameStatusEnum,
+  OngoingGameStatus,
+  GameDetails,
+  GameVersion,
+  GAME_ABANDONED_TURN_EXPIRED_REASON,
+  GAME_FINISHED_TURN_EXPIRED_REASON,
 } from "./constants";
 import { acquireTxnScopeAdvisoryLock } from "../database/advisory-lock";
 import {
@@ -26,30 +30,8 @@ import {
   UserActiveGameExistsError,
 } from "./errors";
 import { hashStringToNumber } from "../common/hash";
+import * as MoveService from "../moves/service";
 
-// type definitions
-
-type GameDetails = {
-  gameID: number;
-  status: GameStatusEnum;
-  currentTurnID: number;
-  turnExpired: boolean;
-  users: { [key: string]: { turnID: number; selection: number }[] };
-  version: number;
-};
-
-type OngoingGameStatus = {
-  gameID: number;
-  status: GameStatusEnum;
-  turnExpired: boolean;
-};
-
-type GameVersion = {
-  gameID: number;
-  version: number;
-};
-
-// Exported functions, mainly the ones handling all the logic
 export async function searchGameForUser(userID: number, txn: DbTransaction) {
   const lockKey = hashStringToNumber(`${USER_HASH_PREFIX}_${userID}`);
   const lockForUserSearch = await acquireTxnScopeAdvisoryLock(lockKey, txn);
@@ -94,12 +76,6 @@ export async function searchGameForUser(userID: number, txn: DbTransaction) {
   }
 }
 
-/**
- * This function will return a detailed view of the game which gives complete information
- * about what is happenig in a game. This function does not take an advisory_lock since this
- * function would also be used to serve the state of the game. A separate function will take
- * an advisory_lock and proceed to update the game based on the object returned by this function.
- */
 export async function getGameDetails(
   gameID: number,
   txn: DbTransaction
@@ -164,7 +140,7 @@ export async function getGameDetails(
 export async function getOngoingGameForUser(
   userID: number,
   txn: DbTransaction
-): Promise<null | OngoingGameStatus> {
+): Promise<OngoingGameStatus | null> {
   const rows = await txn
     .select({
       gameID: activeGameTable.gameID,
@@ -193,12 +169,6 @@ export async function updateGameState(gameID: number, txn: DbTransaction) {
     throw new NoGameFoundError();
   }
 
-  const lockKey = hashStringToNumber(`${GAME_HASH_PREFIX}_${gameID}`);
-  const lockForGameSearch = await acquireTxnScopeAdvisoryLock(lockKey, txn);
-  if (!lockForGameSearch) {
-    throw new GameUpdateInProgress(gameID);
-  }
-
   if (game.status !== GameStatus.INPROGRESS) {
     throw new GameNotInProgressError();
   }
@@ -207,47 +177,42 @@ export async function updateGameState(gameID: number, txn: DbTransaction) {
     throw new NotEnoughPlayersError();
   }
 
-  // have both users made their turn?
-  const bothUsersTurn = Object.values(game.users).every(
-    (moves) => moves.length === game.currentTurnID
+  const lockKey = hashStringToNumber(`${GAME_HASH_PREFIX}_${gameID}`);
+  const lockForGameSearch = await acquireTxnScopeAdvisoryLock(lockKey, txn);
+  if (!lockForGameSearch) {
+    throw new GameUpdateInProgress(gameID);
+  }
+
+  const isTurnComplete = MoveService.isTurnComplete(
+    game.users,
+    game.currentTurnID
   );
-  const isTurnExpired = game.turnExpired
+  const isTurnExpired = game.turnExpired;
 
   // users still have pending time to make a move
-  if (!bothUsersTurn && !isTurnExpired) {
-    console.log('in progress game')
+  if (!isTurnComplete && !isTurnExpired) {
     return;
   }
 
-  if (!bothUsersTurn && isTurnExpired) {
+  if (!isTurnComplete && isTurnExpired) {
     // has anyone of them made there turn?
-    let userWithMove: number | null = null;
-    for (const user in game.users) {
-      const movesLength = game.users[user].length;
-      if (movesLength === game.currentTurnID) {
-        userWithMove = Number(user);
-      }
-    }
+    const userWithCurrentTurnCompleted =
+      MoveService.getUserWithCurrentTurnComplete(
+        game.users,
+        game.currentTurnID
+      );
 
-    // game is abandon since no one made a move
-    if (!userWithMove) {
-      const rows = await txn
-        .update(gameTable)
-        .set({ status: GameStatus.ABANDONED })
-        .where(eq(gameTable.gameID, game.gameID))
-        .returning();
-
-      await txn
-        .delete(activeGameTable)
-        .where(eq(activeGameTable.gameID, gameID));
-
-      if (!rows) {
-        throw new GameVersionMismatchError();
-      }
-
-      return;
+    // game is abandoned since no one made a move
+    if (!userWithCurrentTurnCompleted) {
+      return await abandonGame(game.gameID, game.version, txn);
     } else {
       // user who made the move won, even if they had less of a score
+      return await finishGameDueTurnExpiry(
+        userWithCurrentTurnCompleted,
+        game.gameID,
+        game.version,
+        txn
+      );
     }
   }
 
@@ -266,9 +231,7 @@ export async function updateGameState(gameID: number, txn: DbTransaction) {
     : {
         version: sql`${gameTable.version} + 1`,
         currentTurnID: sql`${gameTable.currentTurnID} + 1`,
-        currentTurnExpiresAt: new Date(
-          Date.now() + GAME_TURN_EXPIRY_MILLISECONDS
-        ),
+        currentTurnExpiresAt: sql`now() + interval '${GAME_TURN_EXPIRY_MILLISECONDS} milliseconds'`,
       };
 
   const rows = await txn
@@ -401,6 +364,53 @@ async function createNewGame(userID: number, txn: DbTransaction) {
 
     return gameID;
   });
+}
+
+async function abandonGame(
+  gameID: number,
+  version: number,
+  txn: DbTransaction
+): Promise<void> {
+  const rows = await txn
+    .update(gameTable)
+    .set({
+      status: GameStatus.ABANDONED,
+      attributes: sql`${gameTable.attributes} || '{"reason": ${GAME_ABANDONED_TURN_EXPIRED_REASON}}::jsonb'`,
+    })
+    .where(and(eq(gameTable.gameID, gameID), eq(gameTable.version, version)))
+    .returning();
+
+  if (!rows) {
+    throw new GameVersionMismatchError();
+  }
+
+  await txn.delete(activeGameTable).where(eq(activeGameTable.gameID, gameID));
+}
+
+async function finishGameDueTurnExpiry(
+  winnerID: number,
+  gameID: number,
+  version: number,
+  txn: DbTransaction
+) {
+  const rows = await txn
+    .update(gameTable)
+    .set({
+      status: GameStatus.FINISHED,
+      attributes: sql`${gameTable.attributes} || 
+        '{
+          "reason": ${GAME_FINISHED_TURN_EXPIRED_REASON}, 
+          "winnerID": ${winnerID}
+        }'`,
+    })
+    .where(and(eq(gameTable.gameID, gameID), eq(gameTable.version, version)))
+    .returning();
+
+  if (!rows) {
+    throw new GameVersionMismatchError();
+  }
+
+  await txn.delete(activeGameTable).where(eq(activeGameTable.gameID, gameID));
 }
 
 // query wrappers

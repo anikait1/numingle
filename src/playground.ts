@@ -8,7 +8,7 @@ import Postgres from "postgres";
 import { db } from "./database/db";
 import { userTable } from "./database/schema";
 import { sql } from "drizzle-orm";
-import { getGameDetails, getOngoingGameForUser, searchGameForUser, updateGameState, } from "./game/service";
+import { abandonGame, getGameDetails, getOngoingGameForUser, searchGameForUser, updateGameState, } from "./game/service";
 
 // const userID = parseInt(process.argv[2]);
 
@@ -26,7 +26,7 @@ import { getGameDetails, getOngoingGameForUser, searchGameForUser, updateGameSta
 // console.log(await Promise.all(searches))
 
 await db.transaction(async txn => {
-    console.log(await getGameDetails(9, txn))
+    await abandonGame(12, 1, txn)
 })
 // await db.transaction(async (txn) => {
 //     const searches: any = []

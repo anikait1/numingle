@@ -2,7 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { DbTransaction } from "../database/db";
 import { gameTable, moveTable } from "../database/schema";
 import * as GameService from "../game/service";
-import { GameStatus } from "../game/constants";
+import { GameStatus, UserMoveMapping } from "../game/constants";
 import { GameNotInProgressError, NoActiveGameError } from "../game/errors";
 import { MoveAlreadyExistsError, TurnTimeLimitExceededError } from "./error";
 
@@ -47,4 +47,36 @@ export async function makeMove(
   }
 
   return rows[0];
+}
+
+export function isTurnComplete(
+  usersMoves: UserMoveMapping,
+  currentTurnID: number
+): boolean {
+  for (const user in usersMoves) {
+    const moves = usersMoves[user];
+    if (moves.length !== currentTurnID) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// identify the first user which has made a move
+export function getUserWithCurrentTurnComplete(
+  userMoves: UserMoveMapping,
+  currentTurnID: number
+): number | null {
+  for (const user in userMoves) {
+    const moves = userMoves[user];
+    if (
+      moves.length === currentTurnID &&
+      moves[currentTurnID - 1]?.turnID === currentTurnID
+    ) {
+      return Number(user);
+    }
+  }
+
+  return null;
 }
