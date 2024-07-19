@@ -54,7 +54,7 @@ export function isTurnComplete(
   currentTurnID: number
 ): boolean {
   for (const user in usersMoves) {
-    const moves = usersMoves[user];
+    const moves = usersMoves[user].moves;
     if (moves.length !== currentTurnID) {
       return false;
     }
@@ -69,7 +69,7 @@ export function getUserWithCurrentTurnComplete(
   currentTurnID: number
 ): number | null {
   for (const user in userMoves) {
-    const moves = userMoves[user];
+    const moves = userMoves[user].moves;
     if (
       moves.length === currentTurnID &&
       moves[currentTurnID - 1]?.turnID === currentTurnID
@@ -79,4 +79,34 @@ export function getUserWithCurrentTurnComplete(
   }
 
   return null;
+}
+
+export function getUserWithMaxScore(userMoves: UserMoveMapping): number | null {
+  let score = -Infinity;
+  let selectedUser: number | null = null;
+  let allEqualScore = true;
+  let firstScore: number | null = null;
+
+  for (const user in userMoves) {
+    const currentScore = userMoves[user].score
+
+    if (firstScore === null) {
+      firstScore = currentScore;
+    }
+
+    if (currentScore !== firstScore) {
+      allEqualScore = false;
+    }
+
+    if (currentScore > score) {
+      score = currentScore;
+      selectedUser = Number(user)
+    }
+  }
+
+  if (allEqualScore) {
+    return null;
+  }
+
+  return selectedUser;
 }

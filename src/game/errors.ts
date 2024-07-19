@@ -25,7 +25,7 @@ export class GameUpdateInProgress extends Error {
     this.name = GameUpdateInProgress.name;
   }
 
-  static errorMessage = "game's state is already in progress for this game";
+  static errorMessage = "game update is already in progress";
 }
 
 export class UserActiveGameExistsError extends Error {
@@ -45,9 +45,13 @@ export class UserActiveGameExistsError extends Error {
 
 export class NoActiveGameError extends Error {}
 
-export class NoGameFoundError extends Error {}
+export class NoGameFoundError extends Error {
+  static errrorMessage = "no game found with the given gameID"
+}
 
-export class NotEnoughPlayersError extends Error {}
+export class NotEnoughPlayersError extends Error {
+  static errorMessage = "game does not has enough players to start"
+}
 
 export class GameVersionMismatchError extends Error {}
 
@@ -59,4 +63,6 @@ export class DataInconsistencyError extends Error {
   }
 }
 
-export class GameNotInProgressError extends Error {}
+export class GameNotInProgressError extends Error {
+  static errorMessage = "game is currently not in progress"
+}

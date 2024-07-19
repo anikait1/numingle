@@ -1,5 +1,4 @@
-import assert from "node:assert";
-import { DrizzleError, and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { DbTransaction } from "../database/db";
 import {
   activeGameTable,
@@ -9,7 +8,6 @@ import {
 } from "../database/schema";
 import {
   GAME_HASH_PREFIX,
-  GAME_TURN_EXPIRY_MILLISECONDS,
   USER_HASH_PREFIX,
   GameStatus,
   OngoingGameStatus,
@@ -17,6 +15,9 @@ import {
   GameVersion,
   GAME_ABANDONED_TURN_EXPIRED_REASON,
   GAME_FINISHED_TURN_EXPIRED_REASON,
+  turnExpiryIntervalParameter,
+  GAME_PLAYER_COUNT,
+  GAME_FINISHED_IN_A_DRAW,
 } from "./constants";
 import { acquireTxnScopeAdvisoryLock } from "../database/advisory-lock";
 import {
@@ -107,7 +108,10 @@ export async function getGameDetails(
       value: sql`
         coalesce(
           jsonb_object_agg(
-            ${gameUserMapTable.userID}, ${movesAgg}
+            ${gameUserMapTable.userID}, json_build_object(
+              'moves', ${movesAgg},
+              'score', ${gameUserMapTable.score}
+            )
           ),
           '{}'::jsonb
         )
@@ -166,21 +170,28 @@ export async function getOngoingGameForUser(
 export async function updateGameState(gameID: number, txn: DbTransaction) {
   const game = await getGameDetails(gameID, txn);
   if (!game) {
-    throw new NoGameFoundError();
+    console.log(NoGameFoundError.errrorMessage, gameID);
+    return;
+    // throw new NoGameFoundError();
   }
 
   if (game.status !== GameStatus.INPROGRESS) {
-    throw new GameNotInProgressError();
+    console.log(GameNotInProgressError.errorMessage, gameID);
+    return;
+    // throw new GameNotInProgressError();
   }
 
-  if (Object.keys(game.users).length !== 2) {
-    throw new NotEnoughPlayersError();
+  if (Object.keys(game.users).length !== GAME_PLAYER_COUNT) {
+    console.log(NotEnoughPlayersError.errorMessage, gameID);
+    return;
+    // throw new NotEnoughPlayersError();
   }
 
   const lockKey = hashStringToNumber(`${GAME_HASH_PREFIX}_${gameID}`);
   const lockForGameSearch = await acquireTxnScopeAdvisoryLock(lockKey, txn);
   if (!lockForGameSearch) {
-    throw new GameUpdateInProgress(gameID);
+    console.log(GameUpdateInProgress.errorMessage, gameID);
+    return;
   }
 
   const isTurnComplete = MoveService.isTurnComplete(
@@ -194,6 +205,7 @@ export async function updateGameState(gameID: number, txn: DbTransaction) {
     return;
   }
 
+  // turn is not complete and time has expired
   if (!isTurnComplete && isTurnExpired) {
     // has anyone of them made there turn?
     const userWithCurrentTurnCompleted =
@@ -217,56 +229,18 @@ export async function updateGameState(gameID: number, txn: DbTransaction) {
   }
 
   // scores need to be calculated and game might move to next turn
+  console.log(JSON.stringify(Object.values(game.users)))
   const isGameOver = Object.values(game.users)
-    .map((moves) => moves[game.currentTurnID - 1].selection)
+    .map((userSummary) => userSummary.moves[game.currentTurnID - 1].selection)
     .every((value, _, arr) => value === arr[0]);
 
-  // TODO update the attributes column accordingly
-  const payload = isGameOver
-    ? {
-        version: sql`${gameTable.version} + 1`,
-        status: GameStatus.FINISHED,
-        endedAt: new Date(),
-      }
-    : {
-        version: sql`${gameTable.version} + 1`,
-        currentTurnID: sql`${gameTable.currentTurnID} + 1`,
-        currentTurnExpiresAt: sql`now() + interval '${GAME_TURN_EXPIRY_MILLISECONDS} milliseconds'`,
-      };
-
-  const rows = await txn
-    .update(gameTable)
-    .set(payload)
-    .where(
-      and(
-        eq(gameTable.gameID, game.gameID),
-        eq(gameTable.version, game.version)
-      )
-    )
-    .returning();
-
-  if (!rows.length) {
-    throw new GameVersionMismatchError();
+  // TODO update the winner id
+  if (isGameOver) {
+    const winnerID = MoveService.getUserWithMaxScore(game.users)
+    return await finishGameDueToSameMove(winnerID, game.gameID, game.version, txn);
   }
 
-  // update score
-  if (!isGameOver) {
-    for (const user in game.users) {
-      await txn
-        .update(gameUserMapTable)
-        .set({
-          score: sql`${gameUserMapTable.score} + ${
-            game.users[user][game.currentTurnID - 1].selection
-          }`,
-        })
-        .where(
-          and(
-            eq(gameUserMapTable.gameID, game.gameID),
-            eq(gameUserMapTable.userID, Number(user))
-          )
-        );
-    }
-  }
+  return await moveGameToNextTurn(game, txn);
 }
 
 async function searchWaitingGames(userID: number, txn: DbTransaction) {
@@ -366,7 +340,7 @@ async function createNewGame(userID: number, txn: DbTransaction) {
   });
 }
 
-async function abandonGame(
+export async function abandonGame(
   gameID: number,
   version: number,
   txn: DbTransaction
@@ -375,7 +349,9 @@ async function abandonGame(
     .update(gameTable)
     .set({
       status: GameStatus.ABANDONED,
-      attributes: sql`${gameTable.attributes} || '{"reason": ${GAME_ABANDONED_TURN_EXPIRED_REASON}}::jsonb'`,
+      attributes: sql`${gameTable.attributes} || ${{
+        reason: GAME_ABANDONED_TURN_EXPIRED_REASON,
+      }}`,
     })
     .where(and(eq(gameTable.gameID, gameID), eq(gameTable.version, version)))
     .returning();
@@ -387,7 +363,7 @@ async function abandonGame(
   await txn.delete(activeGameTable).where(eq(activeGameTable.gameID, gameID));
 }
 
-async function finishGameDueTurnExpiry(
+export async function finishGameDueTurnExpiry(
   winnerID: number,
   gameID: number,
   version: number,
@@ -397,11 +373,72 @@ async function finishGameDueTurnExpiry(
     .update(gameTable)
     .set({
       status: GameStatus.FINISHED,
-      attributes: sql`${gameTable.attributes} || 
-        '{
-          "reason": ${GAME_FINISHED_TURN_EXPIRED_REASON}, 
-          "winnerID": ${winnerID}
-        }'`,
+      attributes: sql`${gameTable.attributes} || ${{
+        reason: GAME_FINISHED_TURN_EXPIRED_REASON,
+        winnerID,
+      }}`,
+    })
+    .where(and(eq(gameTable.gameID, gameID), eq(gameTable.version, version)))
+    .returning();
+
+  if (!rows) {
+    throw new GameVersionMismatchError();
+  }
+
+  await txn.delete(activeGameTable).where(eq(activeGameTable.gameID, gameID));
+}
+
+export async function moveGameToNextTurn(
+  gameDetails: GameDetails,
+  txn: DbTransaction
+) {
+  const rows = await txn
+    .update(gameTable)
+    .set({
+      version: sql`${gameTable.version} + 1`,
+      currentTurnID: sql`${gameTable.currentTurnID} + 1`,
+      currentTurnExpiresAt: sql`now() + ${turnExpiryIntervalParameter()}::interval`,
+    })
+    .where(and(eq(gameTable.gameID, gameDetails.gameID), eq(gameTable.version, gameDetails.version)))
+    .returning();
+
+  if (!rows) {
+    throw new GameVersionMismatchError();
+  }
+
+  // TODO - make it Promise.allSettled
+  for (const user in gameDetails.users) {
+    const userSummary = gameDetails.users[user];
+    await txn
+      .update(gameUserMapTable)
+      .set({
+        score: sql`${gameUserMapTable.score} + ${
+          userSummary.moves[gameDetails.currentTurnID - 1].selection
+        }`,
+      })
+      .where(
+        and(
+          eq(gameUserMapTable.gameID, gameDetails.gameID),
+          eq(gameUserMapTable.userID, Number(user))
+        )
+      );
+  }
+}
+
+export async function finishGameDueToSameMove(
+  winnerID: number | null,
+  gameID: number,
+  version: number,
+  txn: DbTransaction
+) {
+  const attributes = winnerID !== null ? {winnerID}  : {reason: GAME_FINISHED_IN_A_DRAW}
+  const rows = await txn
+    .update(gameTable)
+    .set({
+      version: sql`${gameTable.version} + 1`,
+      status: GameStatus.FINISHED,
+      endedAt: new Date(),
+      attributes: sql`${gameTable.attributes} || ${attributes}`,
     })
     .where(and(eq(gameTable.gameID, gameID), eq(gameTable.version, version)))
     .returning();
@@ -435,7 +472,7 @@ function insertGameUserMapQuery(
   return txn.insert(gameUserMapTable).values({ gameID, userID });
 }
 
-function updateGameToInProgressQuery(
+export function updateGameToInProgressQuery(
   gameID: number,
   version: number,
   txn: DbTransaction
@@ -444,9 +481,7 @@ function updateGameToInProgressQuery(
     .update(gameTable)
     .set({
       status: GameStatus.INPROGRESS,
-      currentTurnExpiresAt: new Date(
-        Date.now() + GAME_TURN_EXPIRY_MILLISECONDS
-      ),
+      currentTurnExpiresAt: sql`now() + ${turnExpiryIntervalParameter()}::interval`,
       version: sql`${gameTable.version} + 1`,
     })
     .where(and(eq(gameTable.gameID, gameID), eq(gameTable.version, version)))

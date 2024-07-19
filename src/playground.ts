@@ -8,34 +8,11 @@ import Postgres from "postgres";
 import { db } from "./database/db";
 import { userTable } from "./database/schema";
 import { sql } from "drizzle-orm";
-import { abandonGame, getGameDetails, getOngoingGameForUser, searchGameForUser, updateGameState, } from "./game/service";
+import { abandonGame, finishGameDueTurnExpiry, getGameDetails, getOngoingGameForUser, searchGameForUser, updateGameState, updateGameToInProgressQuery, } from "./game/service";
 
-// const userID = parseInt(process.argv[2]);
-
-// async function searchGameWrapper(userID: number) {
-//     return await db.transaction(async txn => {
-//         return await searchGameForUser(userID, txn)
-//     })
-// }
-
-// const searches: any[] = []
-// for (let i = 10; i < 1000; i++) {
-//     searches.push(searchGameWrapper(i))
-// }
-
-// console.log(await Promise.all(searches))
-
-await db.transaction(async txn => {
-    await abandonGame(12, 1, txn)
+const result = await db.transaction(async txn => {
+    return await updateGameState(31, txn);
 })
-// await db.transaction(async (txn) => {
-//     const searches: any = []
-//   for (let i = 10; i < 100; i++) {
-//     searches.push(searchGame(i, txn))
-//   }
-
-//   await Promise.all(searches)
-// });
 
 /**
  * are you part of the game?
