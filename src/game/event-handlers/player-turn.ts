@@ -1,13 +1,7 @@
 import type { DbTransaction } from "../../database/db";
 import { gameEventTable } from "../../database/schema";
-import { TurnExpiredError } from "../error";
 import {
-  GameEventType,
-  type GameFinishedEvent,
-  type GameTurnCompleteEvent,
-  type GameTurnStartedEvent,
-  type PlayerJoinedEvent,
-  type PlayerTurnEvent,
+  GameEventType, type GameTurnCompleteEvent, type PlayerTurnEvent
 } from "../types";
 import { and, sql, eq, inArray } from "drizzle-orm";
 
@@ -83,15 +77,9 @@ export function validate(
   if (turnCompletedEvent) throw new Error();
 
   const turnExpiredEvent = turnEvents.find(
-    (turnEvent) => turnEvent.type === GameEventType.TURN_COMPLETE
+    (turnEvent) => turnEvent.type === GameEventType.TURN_EXPIRED
   );
   if (turnExpiredEvent) throw new Error();
-
-  if (
-    Math.floor(Date.now() / 1000) >
-    (turnStartedEvent.payload as GameTurnStartedEvent["data"]).expiry
-  )
-    throw new TurnExpiredError();
 
   return `${gameID}-${event.type}-${event.data.player_id}-${event.data.turn_id}`;
 }
@@ -127,10 +115,18 @@ export function process(
     )
     .all();
 
+  /**
+   * No need for any processing if players are yet to complete
+   * their respective turn.
+   */
   if (playerJoinedEvents.length !== playerTurnEvents.length) {
     return null;
   }
 
+  /**
+   * C
+   */
+  
   const otherPlayerTurnEventPayload = playerTurnEvents.find(
     (turnEvent) =>
       (turnEvent.payload as PlayerTurnEvent["data"]).player_id !==

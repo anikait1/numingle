@@ -1,5 +1,5 @@
 import type { DbTransaction } from "../database/db";
-import { GameEventType, type GameEvent } from "./types";
+import { GameEventType, type GameEvent, type GameTurnStartedEvent } from "./types";
 import * as PlayerJoinedEventHandler from "./event-handlers/player-joined";
 import * as PlayerTurnEventHandler from "./event-handlers/player-turn";
 import { gameEventTable, gameTable } from "../database/schema";
@@ -51,10 +51,11 @@ export async function handleEvent(
 
     case GameEventType.STARTED: {
       await saveEvent(txn, gameID, event, `${gameID}-${event.type}`);
-      await handleEvent(txn, gameID, {
+      const nextEvent: GameTurnStartedEvent = {
         type: GameEventType.TURN_STARTED,
-        data: { turn_id: 1, expiry: Math.floor(Date.now() / 1000) + 5 },
-      });
+        data: {turn_id: 1, expiry: Math.floor(Date.now() / 1000) + 1}
+      }
+      await handleEvent(txn, gameID, nextEvent);
       return;
     }
 
