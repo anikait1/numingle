@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Demo</title>
+</head>
+<body>
+    <input type="text" id="userId" placeholder="Enter User ID">
+    <button onclick="connectWebSocket()">Connect</button>
+    <br>
+    <input type="number" id="eventNumber" placeholder="Enter a number">
+    <button onclick="sendEvent()">Send Event</button>
+    <div id="messages" style="margin-top: 10px; padding: 10px; border: 1px solid #000; width: 300px; height: 200px; overflow-y: auto;"></div>
+
+    <script>
+        let socket;
+
+        function connectWebSocket() {
+            const userId = document.getElementById("userId").value;
+            if (!userId) {
+                alert("Please enter a User ID");
+                return;
+            }
+
+            // Close any existing socket before creating a new one
+            if (socket) {
+                socket.close();
+            }
+
+            console.log(userId)
+            socket = new WebSocket(`ws://localhost:3001?userID=${encodeURIComponent(userId)}&gameID=1`);
+            socket.addEventListener("open", () => {
+                console.log("WebSocket connected");
+            });
+
+            socket.addEventListener("message", (event) => {
+                console.log("Received:", event.data);
+                const messagesBox = document.getElementById("messages");
+                messagesBox.innerHTML += `<p>${event.data}</p>`;
+                messagesBox.scrollTop = messagesBox.scrollHeight;
+            });
+
+            socket.addEventListener("error", (e) =>{ 
+                console.log("error",)
+            })
+
+            socket.addEventListener("close", (e) => {
+                e.re
+                console.log("WebSocket closed");
+            });
+        }
+
+        function sendEvent() {
+            const eventNumber = document.getElementById("eventNumber").value;
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                alert("WebSocket is not connected");
+                return;
+            }
+            if (!eventNumber) {
+                alert("Please enter a number");
+                return;
+            }
+            socket.send(JSON.stringify({ event: 'numberEvent', data: Number(eventNumber) }));
+        }
+    </script>
+</body>
+</html>
