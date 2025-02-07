@@ -1,9 +1,4 @@
 import type { DbTransaction } from "../database/db";
-import {
-  GameEventType,
-  type GameEvent,
-  type GameTurnStartedEvent,
-} from "./types";
 import * as PlayerJoinedEventHandler from "./event-handlers/player-joined";
 import * as PlayerTurnEventHandler from "./event-handlers/player-turn";
 import * as GameTurnCompleteEventHandler from "./event-handlers/turn-complete";
@@ -16,12 +11,13 @@ import {
   PlayerAlreadyInGameError,
   TurnExpiredError,
 } from "./error";
+import { GameEventType, type GameEvent, type GameTurnStartedEvent } from "./schema";
 
 export function handleEvent(
   txn: DbTransaction,
   gameID: number,
   event: GameEvent,
-): GameEvent | DuplicateEventType | null {
+) {
   const game = txn
     .select()
     .from(gameTable)
@@ -74,7 +70,7 @@ export function handleEvent(
       )
         return DUPLICATE_EVENT;
 
-      return null;
+      return event;
     }
 
     case GameEventType.PLAYER_TURN: {
@@ -118,7 +114,7 @@ export function handleEvent(
       const hash = GameFinishedEventHandler.validate(txn, gameID, event);
       if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
 
-      return null;
+      return event;
     }
   }
 

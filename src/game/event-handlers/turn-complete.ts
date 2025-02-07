@@ -1,14 +1,8 @@
 import { eq, and, inArray, sql } from "drizzle-orm";
 import type { DbTransaction } from "../../database/db";
 import { gameEventTable } from "../../database/schema";
-import {
-  GameEventType,
-  type GameFinishedEvent,
-  type GameTurnCompleteEvent,
-  type GameTurnStartedEvent,
-  type PlayerTurnEvent,
-} from "../types";
 import { GameEventOutOfOrderError } from "../error";
+import { GameEventType, type GameFinishedEvent, type GameTurnCompleteEvent, type GameTurnStartedEvent, type PlayerTurnEvent } from "../schema";
 
 const LAST_SUPPORTED_EVENTS = [GameEventType.PLAYER_TURN];
 
@@ -64,25 +58,25 @@ export function process(
     return {
       type: GameEventType.FINISHED,
       data: {
-        summary: {
-          players: Object.fromEntries(
-            Object.entries(event.data.player_scores).map(([id, score]) => [
-              id,
-              { score },
-            ]),
-          ),
-          ...(new Set(Object.values(event.data.player_scores)).size === 1
-            ? { status: "draw" }
-            : {
-                status: "result",
-                winner: Number(
-                  Object.entries(event.data.player_scores).reduce((a, b) =>
-                    a[1] > b[1] ? a : b,
-                  )[0],
-                ),
-                reason: "score",
-              }),
-        },
+        summary: new Set(Object.values(event.data.player_scores)).size === 1
+          ? {
+              status: "draw" as const,
+              players: Object.fromEntries(
+                Object.entries(event.data.player_scores).map(([id, score]) => [id, { score }])
+              ),
+            }
+          : {
+              status: "result" as const,
+              players: Object.fromEntries(
+                Object.entries(event.data.player_scores).map(([id, score]) => [id, { score }])
+              ),
+              winner: Number(
+                Object.entries(event.data.player_scores).reduce((a, b) =>
+                  a[1] > b[1] ? a : b
+                )[0]
+              ),
+              reason: "score",
+            }
       },
     };
   }
