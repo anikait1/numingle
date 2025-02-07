@@ -15,8 +15,8 @@ export type GameEventType = (typeof GameEventType)[keyof typeof GameEventType];
 type GameSummary = {
   players: {
     [playerID: string]: { score: number };
-  }
-}
+  };
+};
 
 export type GameEventRecord<T extends GameEventType, D> = {
   type: T;
@@ -45,11 +45,11 @@ export type PlayerTurnEvent = GameEventRecord<
 >;
 export type GameTurnStartedEvent = GameEventRecord<
   typeof GameEventType.TURN_STARTED,
-  { turn_id: number, expiry: number }
+  { turn_id: number; expiry: number }
 >;
 export type GameTurnCompleteEvent = GameEventRecord<
   typeof GameEventType.TURN_COMPLETE,
-  { turn_id: number, player_scores: {[player_id: string]: number} }
+  { turn_id: number; player_scores: { [player_id: string]: number } }
 >;
 export type GameTurnExpiredEvent = GameEventRecord<
   typeof GameEventType.TURN_EXPIRED,

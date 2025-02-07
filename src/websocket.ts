@@ -16,7 +16,7 @@ const websocketServer = Bun.serve<WebSocketData>({
       data: {
         connectionID: Bun.randomUUIDv7("hex"),
         userID,
-        gameID
+        gameID,
       },
     });
     return success
@@ -24,22 +24,17 @@ const websocketServer = Bun.serve<WebSocketData>({
       : new Response("Websocket upgrade failed", { status: 400 });
   },
   websocket: {
-    async open(ws) {
-
-    },
+    async open(ws) {},
     message(ws, message) {
-      if (typeof message !== 'string') message = message.toString();
+      if (typeof message !== "string") message = message.toString();
 
       const data = JSON.parse(message);
       switch (data.type) {
-        case 'turn': {
+        case "turn": {
           const payload = data.payload;
           const game = data.game;
-
-          
         }
       }
-
     },
     close(ws, code, reason) {},
   },

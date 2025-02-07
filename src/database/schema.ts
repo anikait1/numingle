@@ -49,5 +49,5 @@ export const gameEventTable = sqliteTable(
   (table) => [
     index("game_event_idx").on(table.gameID, table.type),
     uniqueIndex("game_event_hash").on(table.hash),
-  ]
+  ],
 );

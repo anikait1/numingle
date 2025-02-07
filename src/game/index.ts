@@ -1,7 +1,13 @@
 import type { DbTransaction } from "../database/db";
-import { GameEventType, type GameEvent, type GameTurnStartedEvent } from "./types";
+import {
+  GameEventType,
+  type GameEvent,
+  type GameTurnStartedEvent,
+} from "./types";
 import * as PlayerJoinedEventHandler from "./event-handlers/player-joined";
 import * as PlayerTurnEventHandler from "./event-handlers/player-turn";
+import * as GameTurnCompleteEventHandler from "./event-handlers/turn-complete";
+import * as GameFinishedEventHandler from "./event-handlers/game-finished";
 import { gameEventTable, gameTable } from "../database/schema";
 import { eq } from "drizzle-orm";
 import {
@@ -11,11 +17,11 @@ import {
   TurnExpiredError,
 } from "./error";
 
-export async function handleEvent(
+export function handleEvent(
   txn: DbTransaction,
   gameID: number,
-  event: GameEvent
-) {
+  event: GameEvent,
+): GameEvent | DuplicateEventType | null {
   const game = txn
     .select()
     .from(gameTable)
@@ -25,38 +31,31 @@ export async function handleEvent(
 
   switch (event.type) {
     case GameEventType.CREATED: {
-      await saveEvent(txn, gameID, event, `${gameID}-${event.type}`);
-      return;
+      if (!saveEvent(txn, gameID, event, `${gameID}-${event.type}`))
+        return DUPLICATE_EVENT;
+      return null;
     }
 
     case GameEventType.PLAYER_JOINED: {
-      try {
-        const hash = PlayerJoinedEventHandler.validate(txn, gameID, event);
-        await saveEvent(txn, gameID, event, hash);
-        const nextEvent = PlayerJoinedEventHandler.process(txn, gameID, event);
+      const hash = PlayerJoinedEventHandler.validate(txn, gameID, event);
+      if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
 
-        if (!nextEvent) return;
-        await handleEvent(txn, gameID, nextEvent);
-        return;
-      } catch (err) {
-        if (err instanceof GameAlreadyStartedError) {
-        }
+      const nextEvent = PlayerJoinedEventHandler.process(txn, gameID, event);
+      if (!nextEvent) return null;
 
-        if (err instanceof PlayerAlreadyInGameError) {
-        }
-
-        throw err;
-      }
+      return handleEvent(txn, gameID, nextEvent);
     }
 
     case GameEventType.STARTED: {
-      await saveEvent(txn, gameID, event, `${gameID}-${event.type}`);
+      if (!saveEvent(txn, gameID, event, `${gameID}-${event.type}`))
+        return DUPLICATE_EVENT;
+
       const nextEvent: GameTurnStartedEvent = {
         type: GameEventType.TURN_STARTED,
-        data: {turn_id: 1, expiry: Math.floor(Date.now() / 1000) + 1}
-      }
-      await handleEvent(txn, gameID, nextEvent);
-      return;
+        data: { turn_id: 1, expiry: Math.floor(Date.now() / 1000) + 1 },
+      };
+
+      return handleEvent(txn, gameID, nextEvent);
     }
 
     case GameEventType.TURN_STARTED: {
@@ -65,27 +64,32 @@ export async function handleEvent(
        * so no need to validate and process it. Simply
        * storing it should be enough.
        */
-      await saveEvent(
-        txn,
-        gameID,
-        event,
-        `${gameID}-${event.type}-${event.data.turn_id}`
-      );
-      return;
+      if (
+        !saveEvent(
+          txn,
+          gameID,
+          event,
+          `${gameID}-${event.type}-${event.data.turn_id}`,
+        )
+      )
+        return DUPLICATE_EVENT;
+
+      return null;
     }
 
     case GameEventType.PLAYER_TURN: {
       try {
         const hash = PlayerTurnEventHandler.validate(txn, gameID, event);
-        await saveEvent(txn, gameID, event, hash);
-        const nextEvent = PlayerTurnEventHandler.process(txn, gameID, event);
+        if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
 
-        if (!nextEvent) return;
-        return await handleEvent(txn, gameID, nextEvent);
+        const nextEvent = PlayerTurnEventHandler.process(txn, gameID, event);
+        if (!nextEvent) return null;
+
+        return handleEvent(txn, gameID, nextEvent);
       } catch (err) {
         if (!(err instanceof TurnExpiredError)) throw err;
 
-        return await handleEvent(txn, gameID, {
+        return handleEvent(txn, gameID, {
           type: GameEventType.TURN_EXPIRED,
           data: { turn_id: event.data.turn_id },
         });
@@ -93,7 +97,17 @@ export async function handleEvent(
     }
 
     case GameEventType.TURN_COMPLETE: {
-      break;
+      const hash = GameTurnCompleteEventHandler.validate(txn, gameID, event);
+      if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
+
+      const nextEvent = GameTurnCompleteEventHandler.process(
+        txn,
+        gameID,
+        event,
+      );
+      if (!nextEvent) return null;
+
+      return handleEvent(txn, gameID, nextEvent);
     }
 
     case GameEventType.TURN_EXPIRED: {
@@ -101,26 +115,34 @@ export async function handleEvent(
     }
 
     case GameEventType.FINISHED: {
-      break;
+      const hash = GameFinishedEventHandler.validate(txn, gameID, event);
+      if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
+
+      return null;
     }
   }
+
+  throw new Error();
 }
 
-export async function saveEvent(
+export function saveEvent(
   txn: DbTransaction,
   gameID: number,
   event: GameEvent,
-  toHash: string
-): Promise<typeof gameEventTable.$inferSelect | undefined> {
+  toHash: string,
+): typeof gameEventTable.$inferSelect | undefined {
   return txn
     .insert(gameEventTable)
     .values({
       gameID,
       type: event.type,
       payload: event.data,
-      hash: await Bun.password.hash(toHash),
+      hash: Bun.hash(toHash).toString(),
     })
     .onConflictDoNothing()
     .returning()
     .get();
 }
+
+const DUPLICATE_EVENT = Symbol("duplicate-event");
+type DuplicateEventType = typeof DUPLICATE_EVENT;

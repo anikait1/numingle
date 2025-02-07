@@ -1,9 +1,17 @@
 import type { DbTransaction } from "../../database/db";
-import { gameEventTable } from "../../database/schema";
+import { gameEventTable, gameTable } from "../../database/schema";
+import { GameEventOutOfOrderError } from "../error";
 import {
-  GameEventType, type GameTurnCompleteEvent, type PlayerTurnEvent
+  GameEventType,
+  type GameTurnCompleteEvent,
+  type PlayerTurnEvent,
 } from "../types";
-import { and, sql, eq, inArray } from "drizzle-orm";
+import { and, sql, eq, inArray, desc, count, or } from "drizzle-orm";
+
+const LAST_SUPPORTED_EVENTS: GameEventType[] = [
+  GameEventType.PLAYER_TURN,
+  GameEventType.TURN_STARTED,
+];
 
 /**
  * For a player's turn to be valid, following conditions need to be true
@@ -18,68 +26,24 @@ import { and, sql, eq, inArray } from "drizzle-orm";
 export function validate(
   txn: DbTransaction,
   gameID: number,
-  event: PlayerTurnEvent
+  event: PlayerTurnEvent,
 ) {
-  const gameStatusEvents = txn
+  const lastEvent = txn
     .select()
     .from(gameEventTable)
     .where(
       and(
         eq(gameEventTable.gameID, gameID),
-        inArray(gameEventTable.type, [
-          GameEventType.STARTED,
-          GameEventType.FINISHED,
-          GameEventType.ABANDONED,
-        ])
-      )
+        inArray(gameEventTable.type, LAST_SUPPORTED_EVENTS),
+      ),
     )
-    .all();
+    .orderBy(desc(gameEventTable.createdAt))
+    .get();
 
-  const gameStartedEvent = gameStatusEvents.find(
-    (gameStatusEvent) => gameStatusEvent.type === GameEventType.STARTED
-  );
-  if (!gameStartedEvent) throw new Error();
+  if (!lastEvent)
+    throw new GameEventOutOfOrderError(event.type, LAST_SUPPORTED_EVENTS);
 
-  const gameEndedEvent = gameStatusEvents.find(
-    (gameStatusEvent) =>
-      gameStatusEvent.type === GameEventType.FINISHED ||
-      gameStatusEvent.type === GameEventType.ABANDONED
-  );
-  if (gameEndedEvent) throw new Error();
-
-  const turnEvents = txn
-    .select()
-    .from(gameEventTable)
-    .where(
-      and(
-        eq(gameEventTable.gameID, gameID),
-        inArray(gameEventTable.type, [
-          GameEventType.TURN_STARTED,
-          GameEventType.TURN_COMPLETE,
-          GameEventType.TURN_EXPIRED,
-        ]),
-        eq(
-          sql`json_extract(${gameEventTable.payload}, '$.turn_id')`,
-          event.data.turn_id
-        )
-      )
-    )
-    .all();
-
-  const turnStartedEvent = turnEvents.find(
-    (turnEvent) => turnEvent.type === GameEventType.TURN_STARTED
-  );
-  if (!turnStartedEvent) throw new Error();
-
-  const turnCompletedEvent = turnEvents.find(
-    (turnEvent) => turnEvent.type === GameEventType.TURN_COMPLETE
-  );
-  if (turnCompletedEvent) throw new Error();
-
-  const turnExpiredEvent = turnEvents.find(
-    (turnEvent) => turnEvent.type === GameEventType.TURN_EXPIRED
-  );
-  if (turnExpiredEvent) throw new Error();
+  // TODO - add logic for turn expiry
 
   return `${gameID}-${event.type}-${event.data.player_id}-${event.data.turn_id}`;
 }
@@ -87,84 +51,87 @@ export function validate(
 export function process(
   txn: DbTransaction,
   gameID: number,
-  event: PlayerTurnEvent
+  event: PlayerTurnEvent,
 ): GameTurnCompleteEvent | null {
-  const playerJoinedEvents = txn
-    .select()
+  const eventCounts = txn
+    .select({
+      playerJoinedEventCount: count(
+        sql`case when ${gameEventTable.type} = ${GameEventType.PLAYER_JOINED} then 1 end`,
+      ),
+      playerTurnEventCount: count(
+        sql`case when ${gameEventTable.type} = ${GameEventType.PLAYER_TURN} and json_extract(${gameEventTable.payload}, '$.turn_id') = ${event.data.turn_id} then 1 end`,
+      ),
+    })
     .from(gameEventTable)
-    .where(
-      and(
-        eq(gameEventTable.gameID, gameID),
-        inArray(gameEventTable.type, [GameEventType.PLAYER_JOINED])
-      )
-    )
-    .all();
+    .where(eq(gameEventTable.gameID, gameID))
+    .get();
 
-  const playerTurnEvents = txn
-    .select()
-    .from(gameEventTable)
-    .where(
-      and(
-        eq(gameEventTable.gameID, gameID),
-        eq(gameEventTable.type, GameEventType.PLAYER_TURN),
-        eq(
-          sql`json_extract(${gameEventTable.payload}, '$.turn_id')`,
-          event.data.turn_id
-        )
-      )
-    )
-    .all();
+  if (!eventCounts) {
+    // TODO - log information
+    throw new Error("System in bad state");
+  }
 
   /**
    * No need for any processing if players are yet to complete
    * their respective turn.
    */
-  if (playerJoinedEvents.length !== playerTurnEvents.length) {
+  if (eventCounts.playerJoinedEventCount !== eventCounts.playerTurnEventCount)
     return null;
-  }
 
-  /**
-   * C
-   */
-  
-  const otherPlayerTurnEventPayload = playerTurnEvents.find(
-    (turnEvent) =>
-      (turnEvent.payload as PlayerTurnEvent["data"]).player_id !==
-      event.data.player_id
-  )!.payload as PlayerTurnEvent["data"];
-
-  const previousTurnCompleteEvent = txn
-    .select({
-      data: gameEventTable.payload,
-    })
+  const events = txn
+    .select()
     .from(gameEventTable)
     .where(
       and(
         eq(gameEventTable.gameID, gameID),
-        eq(gameEventTable.type, GameEventType.PLAYER_TURN),
-        eq(
-          sql`json_extract(${gameEventTable.payload}, '$.turn_id')`,
-          event.data.turn_id - 1
-        )
-      )
+        or(
+          and(
+            eq(gameEventTable.type, GameEventType.TURN_COMPLETE),
+            eq(
+              sql`json_extract(${(gameEventTable.payload, "$.turn_id")})`,
+              event.data.turn_id - 1,
+            ),
+          ),
+          and(
+            eq(gameEventTable.type, GameEventType.PLAYER_TURN),
+            eq(
+              sql`json_extract(${gameEventTable.payload}, '$.turn_id')`,
+              event.data.turn_id,
+            ),
+          ),
+        ),
+      ),
     )
-    .get();
+    .all();
 
-  const data = previousTurnCompleteEvent?.data as
-    | GameTurnCompleteEvent["data"]
-    | undefined;
+  const currentTurnEvents = events
+    .filter((event) => event.type === GameEventType.PLAYER_TURN)
+    .map((event) => event.payload) as PlayerTurnEvent["data"][];
+
+  /**
+   * In case no TURN_COMPLETE event was found,
+   * it is safe to assume this was the first turn of the game
+   * and previous scores would be zero
+   */
+  const previousTurnCompleteEvent = (events.find(
+    (event) => event.type === GameEventType.TURN_COMPLETE,
+  )?.payload ?? {
+    turn_id: 0,
+    player_scores: Object.fromEntries(
+      currentTurnEvents.map((turnEvent) => [turnEvent.player_id, 0]),
+    ),
+  }) as GameTurnCompleteEvent["data"];
+
   return {
     type: GameEventType.TURN_COMPLETE,
     data: {
       turn_id: event.data.turn_id,
-      player_scores: {
-        [event.data.player_id]:
-          data?.player_scores?.[event.data.player_id] ??
-          0 + event.data.selection,
-        [otherPlayerTurnEventPayload.player_id]:
-          data?.player_scores?.[otherPlayerTurnEventPayload.player_id] ??
-          0 + otherPlayerTurnEventPayload.selection,
-      },
+      player_scores: Object.fromEntries(
+        currentTurnEvents.map((turnEvent) => [
+          turnEvent.player_id,
+          previousTurnCompleteEvent.player_scores[turnEvent.player_id] + 1,
+        ]),
+      ),
     },
   };
 }
