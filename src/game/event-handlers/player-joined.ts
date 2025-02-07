@@ -2,15 +2,15 @@ import { or, and, eq, inArray, desc } from "drizzle-orm";
 import type { DbTransaction } from "../../database/db";
 import { gameEventTable } from "../../database/schema";
 import {
-  GameEventType,
-  type GameStartedEvent,
-  type PlayerJoinedEvent,
-} from "../types";
-import {
   GameAlreadyStartedError,
   GameEventOutOfOrderError,
   PlayerAlreadyInGameError,
 } from "../error";
+import {
+  GameEventType,
+  type GameStartedEvent,
+  type PlayerJoinedEvent,
+} from "../schema";
 
 const LAST_SUPPORTED_EVENTS = [
   GameEventType.STARTED,

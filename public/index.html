@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Number Match Game</title>
+    <style>
+        body {
+            background-color: #202020;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .nes-container {
+            background-color: #303030;
+            border: 4px solid #fff;
+            padding: 20px;
+            margin: 20px auto;
+            max-width: 600px;
+        }
+
+        .input-group {
+            margin: 15px 0;
+        }
+
+        input {
+            background: #404040;
+            border: 2px solid #fff;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            padding: 8px;
+            width: 200px;
+        }
+
+        button {
+            background: #606060;
+            border: 2px solid #fff;
+            color: #fff;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            margin: 10px;
+            padding: 8px 16px;
+        }
+
+        button:hover {
+            background: #808080;
+        }
+
+        .number-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            max-width: 300px;
+            margin: 20px auto;
+        }
+
+        .number-btn {
+            aspect-ratio: 1;
+            font-size: 24px;
+        }
+
+        .game-status {
+            font-size: 20px;
+            margin: 20px 0;
+        }
+
+        .score-board {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .selected {
+            background: #90EE90;
+            color: #000;
+        }
+    </style>
+</head>
+<body>
+    <div class="nes-container" id="connection-form">
+        <h1>Number Match Game</h1>
+        <div class="input-group">
+            <label for="userId">User ID:</label><br>
+            <input type="number" id="userId" required>
+        </div>
+        <div class="input-group">
+            <label for="gameId">Game ID:</label><br>
+            <input type="number" id="gameId" required>
+        </div>
+        <button onclick="connect()">Connect</button>
+    </div>
+
+    <div class="nes-container hidden" id="game-container">
+        <div class="game-status" id="game-status">Waiting for players...</div>
+        
+        <div class="score-board">
+            <div>Your Score: <span id="your-score">0</span></div>
+            <div>Opponent Score: <span id="opponent-score">0</span></div>
+        </div>
+
+        <div class="number-grid" id="number-grid">
+            <button class="number-btn" onclick="selectNumber(1)">1</button>
+            <button class="number-btn" onclick="selectNumber(2)">2</button>
+            <button class="number-btn" onclick="selectNumber(3)">3</button>
+            <button class="number-btn" onclick="selectNumber(4)">4</button>
+            <button class="number-btn" onclick="selectNumber(5)">5</button>
+            <button class="number-btn" onclick="selectNumber(6)">6</button>
+            <button class="number-btn" onclick="selectNumber(7)">7</button>
+            <button class="number-btn" onclick="selectNumber(8)">8</button>
+            <button class="number-btn" onclick="selectNumber(9)">9</button>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let currentUserId;
+        let currentTurnId;
+        let selectedNumber = null;
+
+        function connect() {
+            const userId = document.getElementById('userId').value;
+            const gameId = document.getElementById('gameId').value;
+
+            if (!userId || !gameId) {
+                alert('Please enter both User ID and Game ID');
+                return;
+            }
+
+            currentUserId = parseInt(userId);
+            ws = new WebSocket(`ws://localhost:3001?userID=${userId}&gameID=${gameId}`);
+
+            ws.onopen = () => {
+                document.getElementById('connection-form').classList.add('hidden');
+                document.getElementById('game-container').classList.remove('hidden');
+                
+                // Send player joined event
+                ws.send(JSON.stringify({
+                    type: 'player-joined',
+                    data: {
+                        player_id: parseInt(userId)
+                    }
+                }));
+            };
+
+            ws.onmessage = handleMessage;
+            ws.onerror = (error) => console.error('WebSocket error:', error);
+            ws.onclose = () => alert('Connection closed');
+        }
+
+        function handleMessage(event) {
+            const message = JSON.parse(event.data);
+            console.log('Received message:', message);
+
+            switch (message.type) {
+                case 'game-started':
+                    document.getElementById('game-status').textContent = 'Game started! Pick a number.';
+                    enableNumberGrid();
+                    break;
+
+                case 'game-turn-started':
+                    currentTurnId = message.data.turn_id;
+                    document.getElementById('game-status').textContent = `Turn ${currentTurnId}: Pick a number!`;
+                    enableNumberGrid();
+                    clearSelection();
+                    break;
+
+                case 'game-turn-complete':
+                    console.log(message.data)
+                    updateScores(message.data.player_scores);
+                    break;
+
+                case 'game-finished':
+                    handleGameFinished(message.data.summary);
+                    break;
+            }
+        }
+
+        function selectNumber(number) {
+            if (!currentTurnId) return;
+
+            selectedNumber = number;
+            
+            // Update UI to show selection
+            document.querySelectorAll('.number-btn').forEach(btn => {
+                btn.classList.remove('selected');
+                if (parseInt(btn.textContent) === number) {
+                    btn.classList.add('selected');
+                }
+            });
+
+            // Send player turn event
+            ws.send(JSON.stringify({
+                type: 'player-turn',
+                data: {
+                    player_id: currentUserId,
+                    turn_id: currentTurnId,
+                    selection: number
+                }
+            }));
+
+            // Disable number grid after selection
+            disableNumberGrid();
+            document.getElementById('game-status').textContent = 'Waiting for opponent...';
+        }
+
+        function updateScores(scores) {
+            const yourScore = scores[currentUserId] || 0;
+            const opponentScore = Object.entries(scores)
+                .find(([playerId]) => parseInt(playerId) !== currentUserId)?.[1] || 0;
+
+            document.getElementById('your-score').textContent = yourScore;
+            document.getElementById('opponent-score').textContent = opponentScore;
+        }
+
+        function handleGameFinished(summary) {
+            let message = '';
+            if (summary.status === 'draw') {
+                message = "Game Over - It's a draw!";
+            } else {
+                message = summary.winner === currentUserId ? 
+                    'Game Over - You won!' : 
+                    'Game Over - Opponent won!';
+            }
+            document.getElementById('game-status').textContent = message;
+            disableNumberGrid();
+        }
+
+        function enableNumberGrid() {
+            document.querySelectorAll('.number-btn').forEach(btn => {
+                btn.disabled = false;
+            });
+        }
+
+        function disableNumberGrid() {
+            document.querySelectorAll('.number-btn').forEach(btn => {
+                btn.disabled = true;
+            });
+        }
+
+        function clearSelection() {
+            selectedNumber = null;
+            document.querySelectorAll('.number-btn').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+        }
+    </script>
+</body>
+</html> 

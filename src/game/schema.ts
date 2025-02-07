@@ -5,8 +5,8 @@ import {
   record,
   union,
   literal,
-  type InferOutput
-} from 'valibot';
+  type InferOutput,
+} from "valibot";
 
 export const GameEventType = {
   CREATED: "game-created",
@@ -89,11 +89,11 @@ export const GameTurnExpiredEventSchema = object({
 
 const GameSummarySchema = union([
   object({
-    status: literal('draw'),
+    status: literal("draw"),
     players: record(string(), PlayerScoreSchema),
   }),
   object({
-    status: literal('result'),
+    status: literal("result"),
     players: record(string(), PlayerScoreSchema),
     winner: number(),
     reason: string(),
@@ -135,8 +135,14 @@ export type GameStartedEvent = InferOutput<typeof GameStartedEventSchema>;
 export type PlayerJoinedEvent = InferOutput<typeof PlayerJoinedEventSchema>;
 export type PlayerLeftEvent = InferOutput<typeof PlayerLeftEventSchema>;
 export type PlayerTurnEvent = InferOutput<typeof PlayerTurnEventSchema>;
-export type GameTurnStartedEvent = InferOutput<typeof GameTurnStartedEventSchema>;
-export type GameTurnCompleteEvent = InferOutput<typeof GameTurnCompleteEventSchema>;
-export type GameTurnExpiredEvent = InferOutput<typeof GameTurnExpiredEventSchema>;
+export type GameTurnStartedEvent = InferOutput<
+  typeof GameTurnStartedEventSchema
+>;
+export type GameTurnCompleteEvent = InferOutput<
+  typeof GameTurnCompleteEventSchema
+>;
+export type GameTurnExpiredEvent = InferOutput<
+  typeof GameTurnExpiredEventSchema
+>;
 export type GameFinishedEvent = InferOutput<typeof GameFinishedEventSchema>;
 export type GameAbandonedEvent = InferOutput<typeof GameAbandonedEventSchema>;

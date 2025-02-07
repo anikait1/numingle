@@ -1,12 +1,12 @@
 import type { DbTransaction } from "../../database/db";
 import { gameEventTable, gameTable } from "../../database/schema";
 import { GameEventOutOfOrderError } from "../error";
+import { and, sql, eq, inArray, desc, count, or } from "drizzle-orm";
 import {
   GameEventType,
   type GameTurnCompleteEvent,
   type PlayerTurnEvent,
-} from "../types";
-import { and, sql, eq, inArray, desc, count, or } from "drizzle-orm";
+} from "../schema";
 
 const LAST_SUPPORTED_EVENTS: GameEventType[] = [
   GameEventType.PLAYER_TURN,
@@ -88,7 +88,7 @@ export function process(
           and(
             eq(gameEventTable.type, GameEventType.TURN_COMPLETE),
             eq(
-              sql`json_extract(${(gameEventTable.payload, "$.turn_id")})`,
+              sql`json_extract(${gameEventTable.payload}, '$.turn_id')`,
               event.data.turn_id - 1,
             ),
           ),
@@ -129,7 +129,8 @@ export function process(
       player_scores: Object.fromEntries(
         currentTurnEvents.map((turnEvent) => [
           turnEvent.player_id,
-          previousTurnCompleteEvent.player_scores[turnEvent.player_id] + 1,
+          previousTurnCompleteEvent.player_scores[turnEvent.player_id] +
+            turnEvent.selection,
         ]),
       ),
     },

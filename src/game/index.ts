@@ -2,7 +2,6 @@ import type { DbTransaction } from "../database/db";
 import * as PlayerJoinedEventHandler from "./event-handlers/player-joined";
 import * as PlayerTurnEventHandler from "./event-handlers/player-turn";
 import * as GameTurnCompleteEventHandler from "./event-handlers/turn-complete";
-import * as GameFinishedEventHandler from "./event-handlers/game-finished";
 import { gameEventTable, gameTable } from "../database/schema";
 import { eq } from "drizzle-orm";
 import {
@@ -11,7 +10,11 @@ import {
   PlayerAlreadyInGameError,
   TurnExpiredError,
 } from "./error";
-import { GameEventType, type GameEvent, type GameTurnStartedEvent } from "./schema";
+import {
+  GameEventType,
+  type GameEvent,
+  type GameTurnStartedEvent,
+} from "./schema";
 
 export function handleEvent(
   txn: DbTransaction,
@@ -111,8 +114,8 @@ export function handleEvent(
     }
 
     case GameEventType.FINISHED: {
-      const hash = GameFinishedEventHandler.validate(txn, gameID, event);
-      if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
+      if (!saveEvent(txn, gameID, event, `${gameID}-${event.type}`))
+        return DUPLICATE_EVENT;
 
       return event;
     }
@@ -140,5 +143,5 @@ export function saveEvent(
     .get();
 }
 
-const DUPLICATE_EVENT = Symbol("duplicate-event");
+export const DUPLICATE_EVENT = Symbol("duplicate-event");
 type DuplicateEventType = typeof DUPLICATE_EVENT;
