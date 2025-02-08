@@ -1,345 +1,394 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Number Match Game</title>
+    <link
+      href="https://unpkg.com/nes.css@latest/css/nes.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css?family=Press+Start+2P"
+      rel="stylesheet"
+    />
+    <script
+      defer
+      src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
     <style>
+      body {
+        background-color: #202020;
+        color: #fff;
+        font-family: "Press Start 2P", cursive;
+        margin: 0;
+        padding: 20px;
+        text-align: center;
+        line-height: 1.5;
+      }
+
+      .game-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+
+      .number-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        max-width: 300px;
+        margin: 20px auto;
+      }
+
+      @media (max-width: 480px) {
+        .number-grid {
+          max-width: 240px;
+        }
+
         body {
-            background-color: #202020;
-            color: #fff;
-            font-family: 'Courier New', monospace;
-            margin: 0;
-            padding: 20px;
-            text-align: center;
+          padding: 10px;
+          font-size: 12px;
         }
 
         .nes-container {
-            background-color: #303030;
-            border: 4px solid #fff;
-            padding: 20px;
-            margin: 20px auto;
-            max-width: 600px;
+          padding: 1rem !important;
         }
+      }
 
-        .input-group {
-            margin: 15px 0;
-        }
+      .selected {
+        background: #92cc41 !important;
+        color: #000 !important;
+      }
 
-        input {
-            background: #404040;
-            border: 2px solid #fff;
-            color: #fff;
-            font-family: 'Courier New', monospace;
-            font-size: 16px;
-            padding: 8px;
-            width: 200px;
-        }
+      .opponent-selected {
+        background: #209cee !important;
+        color: #000 !important;
+      }
 
-        button {
-            background: #606060;
-            border: 2px solid #fff;
-            color: #fff;
-            cursor: pointer;
-            font-family: 'Courier New', monospace;
-            font-size: 16px;
-            margin: 10px;
-            padding: 8px 16px;
-        }
+      .fade-out {
+        transition: all 2s ease-out;
+        background: #606060 !important;
+        color: #fff !important;
+      }
 
-        button:hover {
-            background: #808080;
-        }
+      .unavailable {
+        background: #606060 !important;
+        color: #808080 !important;
+        cursor: not-allowed !important;
+      }
 
-        .number-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            max-width: 300px;
-            margin: 20px auto;
-        }
+      .moves-history {
+        margin: 20px auto;
+        max-height: 200px;
+        overflow-y: auto;
+        text-align: left;
+        padding: 10px;
+      }
 
-        .number-btn {
-            aspect-ratio: 1;
-            font-size: 24px;
-        }
+      .move-entry {
+        padding: 8px;
+        border-bottom: 1px solid #606060;
+        font-size: 12px;
+      }
 
-        .game-status {
-            font-size: 20px;
-            margin: 20px 0;
-        }
+      .nes-container {
+        margin-bottom: 20px;
+        background-color: #303030;
+      }
 
-        .score-board {
-            display: flex;
-            justify-content: space-around;
-            margin: 20px 0;
-        }
+      .nes-btn {
+        margin: 5px;
+        width: 100%;
+        height: 100%;
+        min-height: 50px;
+      }
 
-        .hidden {
-            display: none;
-        }
+      .score-board {
+        display: flex;
+        justify-content: space-around;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 20px 0;
+      }
 
-        .selected {
-            background: #90EE90;  /* Player's selection - green */
-            color: #000;
-        }
+      input.nes-input {
+        max-width: 200px;
+        margin: 10px auto;
+        background: #404040;
+        color: #fff;
+      }
 
-        .opponent-selected {
-            background: #87CEEB;  /* Opponent's selection - light blue */
-            color: #000;
-        }
+      .input-group {
+        margin: 15px 0;
+      }
 
-        .fade-out {
-            transition: all 2s ease-out;
-            background: #606060 !important;
-            color: #fff !important;
-        }
+      .is-hidden {
+        display: none;
+      }
 
-        .moves-history {
-            margin-top: 20px;
-            text-align: left;
-            max-height: 200px;
-            overflow-y: auto;
-            background-color: #404040;
-            border: 2px solid #fff;
-            padding: 10px;
-            margin: 20px auto;
-            max-width: 500px;
-        }
+      h2 {
+        font-size: 1.5em;
+        margin-bottom: 1em;
+      }
 
-        .moves-history h3 {
-            text-align: center;
-            margin-top: 0;
-        }
-
-        .move-entry {
-            padding: 8px;
-            border-bottom: 1px solid #606060;
-            font-size: 14px;
-        }
-
-        .move-entry:last-child {
-            border-bottom: none;
-        }
+      .game-status {
+        min-height: 3em;
+      }
     </style>
-</head>
-<body>
-    <div class="nes-container" id="connection-form">
-        <h1>Number Match Game</h1>
+  </head>
+  <body>
+    <div x-data="game" x-init="initGame">
+      <div class="nes-container is-dark" :class="{ 'is-hidden': isConnected }">
+        <h2 class="title">Number Match Game</h2>
         <div class="input-group">
-            <label for="userId">User ID:</label><br>
-            <input type="number" id="userId" required>
+          <label for="userId">User ID:</label>
+          <input
+            type="number"
+            id="userId"
+            class="nes-input"
+            x-model="userId"
+            @keyup.enter="connect"
+          />
         </div>
         <div class="input-group">
-            <label for="gameId">Game ID:</label><br>
-            <input type="number" id="gameId" required>
+          <label for="gameId">Game ID:</label>
+          <input
+            type="number"
+            id="gameId"
+            class="nes-input"
+            x-model="gameId"
+            @keyup.enter="connect"
+          />
         </div>
-        <button onclick="connect()">Connect</button>
-    </div>
+        <button @click="connect" class="nes-btn is-primary">Connect</button>
+      </div>
 
-    <div class="nes-container hidden" id="game-container">
-        <div class="game-status" id="game-status">Waiting for players...</div>
-        
+      <div class="nes-container is-dark" :class="{ 'is-hidden': !isConnected }">
+        <div
+          class="game-status nes-text"
+          :class="{'is-success': gameStatus.includes('won'),
+                         'is-error': gameStatus.includes('Opponent won'),
+                         'is-primary': !gameStatus.includes('won')}"
+          x-text="gameStatus"
+        ></div>
+
         <div class="score-board">
-            <div>Your Score: <span id="your-score">0</span></div>
-            <div>Opponent Score: <span id="opponent-score">0</span></div>
+          <div class="nes-container is-rounded">
+            Your Score: <span x-text="yourScore"></span>
+          </div>
+          <div class="nes-container is-rounded">
+            Opponent Score: <span x-text="opponentScore"></span>
+          </div>
         </div>
 
-        <div class="number-grid" id="number-grid">
-            <button class="number-btn" onclick="selectNumber(1)">1</button>
-            <button class="number-btn" onclick="selectNumber(2)">2</button>
-            <button class="number-btn" onclick="selectNumber(3)">3</button>
-            <button class="number-btn" onclick="selectNumber(4)">4</button>
-            <button class="number-btn" onclick="selectNumber(5)">5</button>
-            <button class="number-btn" onclick="selectNumber(6)">6</button>
-            <button class="number-btn" onclick="selectNumber(7)">7</button>
-            <button class="number-btn" onclick="selectNumber(8)">8</button>
-            <button class="number-btn" onclick="selectNumber(9)">9</button>
+        <div class="number-grid">
+          <template x-for="n in 9" :key="n">
+            <button
+              class="nes-btn"
+              :class="{
+                'selected': selectedNumber === n,
+                'opponent-selected': opponentSelection === n,
+                'fade-out': fadeOutActive,
+                'unavailable': unavailableSelections.includes(n)
+              }"
+              @click="selectNumber(n)"
+              :disabled="!canSelect || selectedNumber !== null || unavailableSelections.includes(n)"
+              x-text="n"
+            ></button>
+          </template>
         </div>
 
-        <div class="moves-history">
-            <h3>Game Moves</h3>
-            <div id="moves-list"></div>
+        <div class="nes-container is-dark moves-history">
+          <h3>Game Moves</h3>
+          <div id="moves-list">
+            <template x-for="(move, index) in movesHistory" :key="index">
+              <div class="move-entry" x-text="move"></div>
+            </template>
+          </div>
         </div>
+      </div>
     </div>
 
     <script>
-        let ws;
-        let currentUserId;
-        let currentTurnId;
-        let selectedNumber = null;
+      document.addEventListener("alpine:init", () => {
+        Alpine.data("game", () => ({
+          ws: null,
+          userId: "",
+          gameId: "",
+          isConnected: false,
+          gameStatus: "Waiting for players...",
+          yourScore: 0,
+          opponentScore: 0,
+          selectedNumber: null,
+          opponentSelection: null,
+          currentTurnId: null,
+          canSelect: false,
+          movesHistory: [],
+          fadeOutActive: false,
+          unavailableSelections: [],
 
-        function connect() {
-            const userId = document.getElementById('userId').value;
-            const gameId = document.getElementById('gameId').value;
+          initGame() {
+            window.addEventListener("beforeunload", () => {
+              if (this.ws) {
+                this.ws.close();
+              }
+            });
+          },
 
-            if (!userId || !gameId) {
-                alert('Please enter both User ID and Game ID');
-                return;
+          connect() {
+            if (!this.userId || !this.gameId) {
+              alert("Please enter both User ID and Game ID");
+              return;
             }
 
-            currentUserId = parseInt(userId);
-            ws = new WebSocket(`ws://localhost:3001?userID=${userId}&gameID=${gameId}`);
+            this.ws = new WebSocket(
+              `ws://localhost:3001?userID=${this.userId}&gameID=${this.gameId}`,
+            );
 
-            ws.onopen = () => {
-                document.getElementById('connection-form').classList.add('hidden');
-                document.getElementById('game-container').classList.remove('hidden');
-                
-                ws.send(JSON.stringify({
-                    type: 'player-joined',
-                    data: {
-                        player_id: parseInt(userId)
-                    }
-                }));
+            this.ws.onopen = () => {
+              this.isConnected = true;
+              this.ws.send(
+                JSON.stringify({
+                  type: "player-joined",
+                  data: {
+                    player_id: parseInt(this.userId),
+                  },
+                }),
+              );
             };
 
-            ws.onmessage = handleMessage;
-            ws.onerror = (error) => console.error('WebSocket error:', error);
-            ws.onclose = () => alert('Connection closed');
-        }
+            this.ws.onmessage = (event) => this.handleMessage(event);
 
-        function handleMessage(event) {
+            this.ws.onerror = (error) => {
+              console.error("WebSocket error:", error);
+              alert("Connection error occurred");
+            };
+
+            this.ws.onclose = () => {
+              alert("Connection closed");
+              this.isConnected = false;
+            };
+          },
+
+          handleMessage(event) {
             const message = JSON.parse(event.data);
-            console.log('Received message:', message);
+            console.log("Received message:", message);
 
             switch (message.type) {
-                case 'game-started':
-                    clearSelection();
-                    document.getElementById('game-status').textContent = 'Game started! Pick a number.';
-                    enableNumberGrid();
-                    break;
+              case "game-started":
+                this.clearSelection();
+                this.gameStatus = "Game started! Pick a number.";
+                this.canSelect = true;
+                this.unavailableSelections = [];
+                break;
 
-                case 'game-turn-started':
-                    // Add fade-out class to all selected buttons
-                    document.querySelectorAll('.selected, .opponent-selected').forEach(btn => {
-                        btn.classList.add('fade-out');
-                    });
-                    
-                    // Clear selections after transition
-                    setTimeout(() => {
-                        clearSelection();
-                        currentTurnId = message.data.turn_id;
-                        document.getElementById('game-status').textContent = `Turn ${currentTurnId}: Pick a number!`;
-                        enableNumberGrid();
-                    }, 2000);
-                    break;
+              case "game-turn-started":
+                this.fadeOutActive = true;
+                setTimeout(() => {
+                  this.clearSelection();
+                  this.currentTurnId = message.data.turn_id;
+                  this.unavailableSelections = message.data.unavailable_selections[this.userId] || [];
+                  this.gameStatus = `Turn ${this.currentTurnId}: Pick a number!`;
+                  this.canSelect = true;
+                  this.fadeOutActive = false;
+                }, 2000);
+                break;
 
-                case 'game-turn-complete':
-                    handleTurnComplete(message.data);
-                    break;
+              case "game-turn-complete":
+                this.handleTurnComplete(message.data);
+                break;
 
-                case 'game-finished':
-                    handleGameFinished(message.data.summary);
-                    break;
+              case "game-finished":
+                this.handleGameFinished(message.data.summary);
+                break;
             }
-        }
+          },
 
-        async function handleTurnComplete(data) {
+          handleTurnComplete(data) {
             const turnId = data.turn_id;
             const playerGameData = data.player_game_data;
-            
-            // Show both players' selections
-            const moves = Object.entries(playerGameData).map(([playerId, data]) => ({
+
+            const moves = Object.entries(playerGameData).map(
+              ([playerId, data]) => ({
                 playerId: parseInt(playerId),
                 selection: data.selection,
-                score: data.score
-            }));
-
-            // Update moves history
-            const movesList = document.getElementById('moves-list');
-            const moveEntry = document.createElement('div');
-            moveEntry.className = 'move-entry';
-            moveEntry.innerHTML = `Turn ${turnId}: ${moves.map(move => 
-                `Player ${move.playerId} chose ${move.selection}`
-            ).join(' | ')}`;
-            movesList.insertBefore(moveEntry, movesList.firstChild);
-
-            // Highlight opponent's selection
-            moves.forEach(move => {
-                if (move.playerId !== currentUserId) {
-                    const btn = document.querySelector(`.number-btn:nth-child(${move.selection})`);
-                    btn.classList.add('opponent-selected');
-                }
-            });
-
-            // Update scores
-            const scores = Object.fromEntries(
-                Object.entries(playerGameData).map(([playerId, data]) => [playerId, data.score])
+                score: data.score,
+              }),
             );
-            updateScores(scores);
 
-            // Disable grid during delay
-            disableNumberGrid();
-            document.getElementById('game-status').textContent = 'Showing results...';
-        }
+            this.movesHistory.unshift(
+              `Turn ${turnId}: ${moves
+                .map(
+                  (move) => `Player ${move.playerId} chose ${move.selection}`,
+                )
+                .join(" | ")}`,
+            );
 
-        function selectNumber(number) {
-            if (!currentTurnId) return;
-
-            selectedNumber = number;
-            
-            // Update UI to show selection
-            document.querySelectorAll('.number-btn').forEach(btn => {
-                btn.classList.remove('selected', 'opponent-selected', 'fade-out');
-                if (parseInt(btn.textContent) === number) {
-                    btn.classList.add('selected');
-                }
+            moves.forEach((move) => {
+              if (move.playerId !== parseInt(this.userId)) {
+                this.opponentSelection = move.selection;
+              }
             });
 
-            // Send player turn event
-            ws.send(JSON.stringify({
-                type: 'player-turn',
+            const scores = Object.fromEntries(
+              Object.entries(playerGameData).map(([playerId, data]) => [
+                playerId,
+                data.score,
+              ]),
+            );
+            this.updateScores(scores);
+
+            this.canSelect = false;
+            this.gameStatus = "Showing results...";
+          },
+
+          selectNumber(number) {
+            if (!this.currentTurnId || !this.canSelect || this.unavailableSelections.includes(number)) return;
+
+            this.selectedNumber = number;
+
+            this.ws.send(
+              JSON.stringify({
+                type: "player-turn",
                 data: {
-                    player_id: currentUserId,
-                    turn_id: currentTurnId,
-                    selection: number
-                }
-            }));
+                  player_id: parseInt(this.userId),
+                  turn_id: this.currentTurnId,
+                  selection: number,
+                },
+              }),
+            );
 
-            // Disable number grid after selection
-            disableNumberGrid();
-            document.getElementById('game-status').textContent = 'Waiting for opponent...';
-        }
+            this.canSelect = false;
+            this.gameStatus = "Waiting for opponent...";
+          },
 
-        function updateScores(scores) {
-            const yourScore = scores[currentUserId] || 0;
-            const opponentId = Object.keys(scores).find(id => parseInt(id) !== currentUserId);
-            const opponentScore = opponentId ? scores[opponentId] : 0;
+          updateScores(scores) {
+            this.yourScore = scores[this.userId] || 0;
+            const opponentId = Object.keys(scores).find(
+              (id) => parseInt(id) !== parseInt(this.userId),
+            );
+            this.opponentScore = opponentId ? scores[opponentId] : 0;
+          },
 
-            document.getElementById('your-score').textContent = yourScore;
-            document.getElementById('opponent-score').textContent = opponentScore;
-        }
-
-        function handleGameFinished(summary) {
-            let message = '';
-            if (summary.status === 'draw') {
-                message = "Game Over - It's a draw!";
+          handleGameFinished(summary) {
+            if (summary.status === "draw") {
+              this.gameStatus = "Game Over - It's a draw!";
             } else {
-                message = summary.winner === currentUserId ? 
-                    'Game Over - You won!' : 
-                    'Game Over - Opponent won!';
+              this.gameStatus =
+                summary.winner === parseInt(this.userId)
+                  ? "Game Over - You won!"
+                  : "Game Over - Opponent won!";
             }
-            document.getElementById('game-status').textContent = message;
-            disableNumberGrid();
-        }
+            this.canSelect = false;
+          },
 
-        function enableNumberGrid() {
-            document.querySelectorAll('.number-btn').forEach(btn => {
-                btn.disabled = false;
-            });
-        }
-
-        function disableNumberGrid() {
-            document.querySelectorAll('.number-btn').forEach(btn => {
-                btn.disabled = true;
-            });
-        }
-
-        function clearSelection() {
-            selectedNumber = null;
-            document.querySelectorAll('.number-btn').forEach(btn => {
-                btn.classList.remove('selected', 'opponent-selected', 'fade-out');
-            });
-        }
+          clearSelection() {
+            this.selectedNumber = null;
+            this.opponentSelection = null;
+          },
+        }));
+      });
     </script>
-</body>
+  </body>
 </html>

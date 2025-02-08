@@ -5,6 +5,7 @@ import { and, sql, eq, inArray, desc, count, or } from "drizzle-orm";
 import {
   GameEventType,
   type GameTurnCompleteEvent,
+  type GameTurnStartedEvent,
   type PlayerTurnEvent,
 } from "../schema";
 
@@ -28,7 +29,7 @@ export function validate(
   gameID: number,
   event: PlayerTurnEvent,
 ) {
-  const lastEvent = txn
+  const lastEvents = txn
     .select()
     .from(gameEventTable)
     .where(
@@ -38,12 +39,22 @@ export function validate(
       ),
     )
     .orderBy(desc(gameEventTable.createdAt))
-    .get();
+    .all();
 
-  if (!lastEvent)
+  if (!lastEvents.length)
     throw new GameEventOutOfOrderError(event.type, LAST_SUPPORTED_EVENTS);
 
-  // TODO - add logic for turn expiry
+  // TODO - add logic for turn expiry and error for invalid selection
+  const turnStarted = lastEvents.find(
+    (lastEvent) => lastEvent.type === GameEventType.TURN_STARTED,
+  )?.payload as GameTurnStartedEvent["data"];
+  if (
+    turnStarted.unavailable_selections[event.data.player_id].includes(
+      event.data.selection,
+    )
+  ) {
+    throw new Error();
+  }
 
   return `${gameID}-${event.type}-${event.data.player_id}-${event.data.turn_id}`;
 }

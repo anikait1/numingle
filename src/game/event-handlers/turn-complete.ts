@@ -101,6 +101,22 @@ export function process(
     data: {
       turn_id: event.data.turn_id + 1,
       expiry: Math.floor(Date.now() / 1000) + 5,
+      unavailable_selections: Object.fromEntries(
+        playerTurns.map((turn) => {
+          const playerData = turn.payload as PlayerTurnEvent["data"];
+          const currentSelection = playerData.selection;
+
+          const possibleNumbers = Array.from(
+            { length: 9 },
+            (_, i) => i + 1,
+          ).filter((n) => n !== currentSelection);
+          const randomNumbers = possibleNumbers
+            .sort(() => Math.random() - 0.5)
+            .slice(0, 2);
+
+          return [playerData.player_id, [currentSelection, ...randomNumbers]];
+        }),
+      ),
     },
   };
 }

@@ -72,6 +72,7 @@ export const GameTurnStartedEventSchema = object({
   data: object({
     turn_id: number(),
     expiry: number(),
+    unavailable_selections: record(string(), array(number())),
   }),
 });
 

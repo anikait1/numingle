@@ -1,13 +1,14 @@
 import { parse } from "valibot";
-import { GameEventSchema, type GameEvent } from "./game/schema";
+import { GameEventSchema, GameEventType, type GameEvent } from "./game/schema";
 import {
-  BROADCASE_EVENT,
+  BROADCAST_EVENT,
+  DIRECT_EVENT,
   DUPLICATE_EVENT,
   EVENT_BUS,
   handleEvent,
 } from "./game";
 import { db } from "./database/db";
-import { file } from "bun";
+import { file, type ServerWebSocket } from "bun";
 
 type WebSocketData = {
   connectionID: string;
@@ -15,6 +16,7 @@ type WebSocketData = {
   gameID: number;
 };
 
+const connections = new Map<number, ServerWebSocket<WebSocketData>>();
 const websocketServer = Bun.serve<WebSocketData>({
   port: 3001,
   async fetch(req, server) {
@@ -48,6 +50,7 @@ const websocketServer = Bun.serve<WebSocketData>({
     open(ws) {
       console.log(`Connection opened`, ws.data);
       ws.subscribe(`game-id-${ws.data.gameID}`);
+      connections.set(ws.data.userID, ws);
     },
     message(ws, message) {
       try {
@@ -71,10 +74,49 @@ const websocketServer = Bun.serve<WebSocketData>({
 
 console.log(`Websocket server running on port: ${websocketServer.port}`);
 EVENT_BUS.on(
-  BROADCASE_EVENT,
+  BROADCAST_EVENT,
   function broadcastEvent(payload: { gameID: number; event: GameEvent }) {
     const data = JSON.stringify(payload.event);
-
     websocketServer.publish(`game-id-${payload.gameID}`, data);
+  },
+);
+
+EVENT_BUS.on(
+  DIRECT_EVENT,
+  function sendDirectEvent(payload: {
+    gameID: number;
+    event: GameEvent;
+    userID: number;
+  }) {
+    switch (payload.event.type) {
+      case GameEventType.TURN_STARTED: {
+        const playerIDs = Object.keys(
+          payload.event.data.unavailable_selections,
+        );
+        for (const playerID of playerIDs) {
+          const playerWS = connections.get(Number(playerID));
+          if (!playerWS) {
+            console.log("[DISCONNECTED]", { playerID, payload });
+            connections.delete(Number(playerID));
+            continue;
+          }
+
+          const playerEvent = {
+            ...payload.event,
+            data: {
+              ...payload.event.data,
+              unavailable_selections: {
+                [playerID]: payload.event.data.unavailable_selections[playerID],
+              },
+            },
+          };
+
+          playerWS.send(JSON.stringify(playerEvent));
+        }
+        return;
+      }
+    }
+
+    console.log("[NOT CONFIGURED]", payload);
   },
 );

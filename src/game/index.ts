@@ -43,10 +43,16 @@ export function handleEvent(
       if (!saveEvent(txn, gameID, event, `${gameID}-${event.type}`))
         return DUPLICATE_EVENT;
 
-      EVENT_BUS.emit(BROADCASE_EVENT, { gameID, event });
+      EVENT_BUS.emit(BROADCAST_EVENT, { gameID, event });
       const nextEvent: GameTurnStartedEvent = {
         type: GameEventType.TURN_STARTED,
-        data: { turn_id: 1, expiry: Math.floor(Date.now() / 1000) + 1 },
+        data: {
+          turn_id: 1,
+          expiry: Math.floor(Date.now() / 1000) + 1,
+          unavailable_selections: Object.fromEntries(
+            event.data.player_ids.map((player_id) => [player_id, []]),
+          ),
+        },
       };
 
       return handleEvent(txn, gameID, nextEvent);
@@ -68,7 +74,7 @@ export function handleEvent(
       )
         return DUPLICATE_EVENT;
 
-      EVENT_BUS.emit(BROADCASE_EVENT, { gameID, event });
+      EVENT_BUS.emit(DIRECT_EVENT, { gameID, event });
       return;
     }
 
@@ -95,7 +101,7 @@ export function handleEvent(
       const hash = GameTurnCompleteEventHandler.validate(txn, gameID, event);
       if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
 
-      EVENT_BUS.emit(BROADCASE_EVENT, { gameID, event });
+      EVENT_BUS.emit(BROADCAST_EVENT, { gameID, event });
       const nextEvent = GameTurnCompleteEventHandler.process(
         txn,
         gameID,
@@ -114,7 +120,7 @@ export function handleEvent(
       if (!saveEvent(txn, gameID, event, `${gameID}-${event.type}`))
         return DUPLICATE_EVENT;
 
-      EVENT_BUS.emit(BROADCASE_EVENT, { gameID, event });
+      EVENT_BUS.emit(BROADCAST_EVENT, { gameID, event });
       return;
     }
   }
@@ -142,7 +148,8 @@ export function saveEvent(
 }
 
 export const DUPLICATE_EVENT = Symbol("duplicate-event");
-export const BROADCASE_EVENT = Symbol("broadcast-event");
+export const BROADCAST_EVENT = Symbol("broadcast-event");
+export const DIRECT_EVENT = Symbol("direct-event");
 type DuplicateEventType = typeof DUPLICATE_EVENT;
 
 export const EVENT_BUS = new EventEmitter();
