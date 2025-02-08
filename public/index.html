@@ -79,8 +79,46 @@
         }
 
         .selected {
-            background: #90EE90;
+            background: #90EE90;  /* Player's selection - green */
             color: #000;
+        }
+
+        .opponent-selected {
+            background: #87CEEB;  /* Opponent's selection - light blue */
+            color: #000;
+        }
+
+        .fade-out {
+            transition: all 2s ease-out;
+            background: #606060 !important;
+            color: #fff !important;
+        }
+
+        .moves-history {
+            margin-top: 20px;
+            text-align: left;
+            max-height: 200px;
+            overflow-y: auto;
+            background-color: #404040;
+            border: 2px solid #fff;
+            padding: 10px;
+            margin: 20px auto;
+            max-width: 500px;
+        }
+
+        .moves-history h3 {
+            text-align: center;
+            margin-top: 0;
+        }
+
+        .move-entry {
+            padding: 8px;
+            border-bottom: 1px solid #606060;
+            font-size: 14px;
+        }
+
+        .move-entry:last-child {
+            border-bottom: none;
         }
     </style>
 </head>
@@ -117,6 +155,11 @@
             <button class="number-btn" onclick="selectNumber(8)">8</button>
             <button class="number-btn" onclick="selectNumber(9)">9</button>
         </div>
+
+        <div class="moves-history">
+            <h3>Game Moves</h3>
+            <div id="moves-list"></div>
+        </div>
     </div>
 
     <script>
@@ -141,7 +184,6 @@
                 document.getElementById('connection-form').classList.add('hidden');
                 document.getElementById('game-container').classList.remove('hidden');
                 
-                // Send player joined event
                 ws.send(JSON.stringify({
                     type: 'player-joined',
                     data: {
@@ -161,26 +203,73 @@
 
             switch (message.type) {
                 case 'game-started':
+                    clearSelection();
                     document.getElementById('game-status').textContent = 'Game started! Pick a number.';
                     enableNumberGrid();
                     break;
 
                 case 'game-turn-started':
-                    currentTurnId = message.data.turn_id;
-                    document.getElementById('game-status').textContent = `Turn ${currentTurnId}: Pick a number!`;
-                    enableNumberGrid();
-                    clearSelection();
+                    // Add fade-out class to all selected buttons
+                    document.querySelectorAll('.selected, .opponent-selected').forEach(btn => {
+                        btn.classList.add('fade-out');
+                    });
+                    
+                    // Clear selections after transition
+                    setTimeout(() => {
+                        clearSelection();
+                        currentTurnId = message.data.turn_id;
+                        document.getElementById('game-status').textContent = `Turn ${currentTurnId}: Pick a number!`;
+                        enableNumberGrid();
+                    }, 2000);
                     break;
 
                 case 'game-turn-complete':
-                    console.log(message.data)
-                    updateScores(message.data.player_scores);
+                    handleTurnComplete(message.data);
                     break;
 
                 case 'game-finished':
                     handleGameFinished(message.data.summary);
                     break;
             }
+        }
+
+        async function handleTurnComplete(data) {
+            const turnId = data.turn_id;
+            const playerGameData = data.player_game_data;
+            
+            // Show both players' selections
+            const moves = Object.entries(playerGameData).map(([playerId, data]) => ({
+                playerId: parseInt(playerId),
+                selection: data.selection,
+                score: data.score
+            }));
+
+            // Update moves history
+            const movesList = document.getElementById('moves-list');
+            const moveEntry = document.createElement('div');
+            moveEntry.className = 'move-entry';
+            moveEntry.innerHTML = `Turn ${turnId}: ${moves.map(move => 
+                `Player ${move.playerId} chose ${move.selection}`
+            ).join(' | ')}`;
+            movesList.insertBefore(moveEntry, movesList.firstChild);
+
+            // Highlight opponent's selection
+            moves.forEach(move => {
+                if (move.playerId !== currentUserId) {
+                    const btn = document.querySelector(`.number-btn:nth-child(${move.selection})`);
+                    btn.classList.add('opponent-selected');
+                }
+            });
+
+            // Update scores
+            const scores = Object.fromEntries(
+                Object.entries(playerGameData).map(([playerId, data]) => [playerId, data.score])
+            );
+            updateScores(scores);
+
+            // Disable grid during delay
+            disableNumberGrid();
+            document.getElementById('game-status').textContent = 'Showing results...';
         }
 
         function selectNumber(number) {
@@ -190,7 +279,7 @@
             
             // Update UI to show selection
             document.querySelectorAll('.number-btn').forEach(btn => {
-                btn.classList.remove('selected');
+                btn.classList.remove('selected', 'opponent-selected', 'fade-out');
                 if (parseInt(btn.textContent) === number) {
                     btn.classList.add('selected');
                 }
@@ -213,8 +302,8 @@
 
         function updateScores(scores) {
             const yourScore = scores[currentUserId] || 0;
-            const opponentScore = Object.entries(scores)
-                .find(([playerId]) => parseInt(playerId) !== currentUserId)?.[1] || 0;
+            const opponentId = Object.keys(scores).find(id => parseInt(id) !== currentUserId);
+            const opponentScore = opponentId ? scores[opponentId] : 0;
 
             document.getElementById('your-score').textContent = yourScore;
             document.getElementById('opponent-score').textContent = opponentScore;
@@ -248,9 +337,9 @@
         function clearSelection() {
             selectedNumber = null;
             document.querySelectorAll('.number-btn').forEach(btn => {
-                btn.classList.remove('selected');
+                btn.classList.remove('selected', 'opponent-selected', 'fade-out');
             });
         }
     </script>
 </body>
-</html> 
+</html>

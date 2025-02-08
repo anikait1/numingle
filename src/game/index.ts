@@ -3,7 +3,6 @@ import * as PlayerJoinedEventHandler from "./event-handlers/player-joined";
 import * as PlayerTurnEventHandler from "./event-handlers/player-turn";
 import * as GameTurnCompleteEventHandler from "./event-handlers/turn-complete";
 import { gameEventTable, gameTable } from "../database/schema";
-import { eq } from "drizzle-orm";
 import {
   GameAlreadyStartedError,
   GameNotFoundError,
@@ -16,23 +15,18 @@ import {
   type GameTurnStartedEvent,
 } from "./schema";
 
+import EventEmitter from "node:events";
+
 export function handleEvent(
   txn: DbTransaction,
   gameID: number,
   event: GameEvent,
-) {
-  const game = txn
-    .select()
-    .from(gameTable)
-    .where(eq(gameTable.gameID, gameID))
-    .get();
-  if (!game) throw new GameNotFoundError();
-
+): DuplicateEventType | void {
   switch (event.type) {
     case GameEventType.CREATED: {
       if (!saveEvent(txn, gameID, event, `${gameID}-${event.type}`))
         return DUPLICATE_EVENT;
-      return null;
+      return;
     }
 
     case GameEventType.PLAYER_JOINED: {
@@ -40,7 +34,7 @@ export function handleEvent(
       if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
 
       const nextEvent = PlayerJoinedEventHandler.process(txn, gameID, event);
-      if (!nextEvent) return null;
+      if (!nextEvent) return;
 
       return handleEvent(txn, gameID, nextEvent);
     }
@@ -49,6 +43,7 @@ export function handleEvent(
       if (!saveEvent(txn, gameID, event, `${gameID}-${event.type}`))
         return DUPLICATE_EVENT;
 
+      EVENT_BUS.emit(BROADCASE_EVENT, { gameID, event });
       const nextEvent: GameTurnStartedEvent = {
         type: GameEventType.TURN_STARTED,
         data: { turn_id: 1, expiry: Math.floor(Date.now() / 1000) + 1 },
@@ -73,7 +68,8 @@ export function handleEvent(
       )
         return DUPLICATE_EVENT;
 
-      return event;
+      EVENT_BUS.emit(BROADCASE_EVENT, { gameID, event });
+      return;
     }
 
     case GameEventType.PLAYER_TURN: {
@@ -82,7 +78,7 @@ export function handleEvent(
         if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
 
         const nextEvent = PlayerTurnEventHandler.process(txn, gameID, event);
-        if (!nextEvent) return null;
+        if (!nextEvent) return;
 
         return handleEvent(txn, gameID, nextEvent);
       } catch (err) {
@@ -99,12 +95,13 @@ export function handleEvent(
       const hash = GameTurnCompleteEventHandler.validate(txn, gameID, event);
       if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
 
+      EVENT_BUS.emit(BROADCASE_EVENT, { gameID, event });
       const nextEvent = GameTurnCompleteEventHandler.process(
         txn,
         gameID,
         event,
       );
-      if (!nextEvent) return null;
+      if (!nextEvent) return;
 
       return handleEvent(txn, gameID, nextEvent);
     }
@@ -117,7 +114,8 @@ export function handleEvent(
       if (!saveEvent(txn, gameID, event, `${gameID}-${event.type}`))
         return DUPLICATE_EVENT;
 
-      return event;
+      EVENT_BUS.emit(BROADCASE_EVENT, { gameID, event });
+      return;
     }
   }
 
@@ -144,4 +142,7 @@ export function saveEvent(
 }
 
 export const DUPLICATE_EVENT = Symbol("duplicate-event");
+export const BROADCASE_EVENT = Symbol("broadcast-event");
 type DuplicateEventType = typeof DUPLICATE_EVENT;
+
+export const EVENT_BUS = new EventEmitter();

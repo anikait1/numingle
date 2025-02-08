@@ -6,6 +6,7 @@ import {
   union,
   literal,
   type InferOutput,
+  array,
 } from "valibot";
 
 export const GameEventType = {
@@ -38,7 +39,9 @@ export const GameCreatedEventSchema = object({
 
 export const GameStartedEventSchema = object({
   type: literal(GameEventType.STARTED),
-  data: object({}),
+  data: object({
+    player_ids: array(number()),
+  }),
 });
 
 export const PlayerJoinedEventSchema = object({
@@ -76,7 +79,13 @@ export const GameTurnCompleteEventSchema = object({
   type: literal(GameEventType.TURN_COMPLETE),
   data: object({
     turn_id: number(),
-    player_scores: record(string(), number()),
+    player_game_data: record(
+      string(),
+      object({
+        score: number(),
+        selection: number(),
+      }),
+    ),
   }),
 });
 

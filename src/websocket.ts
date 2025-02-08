@@ -1,6 +1,11 @@
 import { parse } from "valibot";
 import { GameEventSchema, type GameEvent } from "./game/schema";
-import { DUPLICATE_EVENT, handleEvent } from "./game";
+import {
+  BROADCASE_EVENT,
+  DUPLICATE_EVENT,
+  EVENT_BUS,
+  handleEvent,
+} from "./game";
 import { db } from "./database/db";
 import { file } from "bun";
 
@@ -25,7 +30,6 @@ const websocketServer = Bun.serve<WebSocketData>({
     }
 
     // Handle websocket upgrade
-    console.log("her");
     const gameID = Number(url.searchParams.get("gameID"));
     const userID = Number(url.searchParams.get("userID"));
 
@@ -47,25 +51,16 @@ const websocketServer = Bun.serve<WebSocketData>({
     },
     message(ws, message) {
       try {
-        console.log("Raw Event", { message });
+        console.log("Raw Event", { message, data: ws.data });
         const rawMessage = JSON.parse(message.toString());
         const event: GameEvent = parse(GameEventSchema, rawMessage);
 
-        const broadcast = db.transaction((txn) =>
+        const duplicateEvent = db.transaction((txn) =>
           handleEvent(txn, ws.data.gameID, event),
         );
-        console.log("Event processed", {
-          incoming: event,
-          outgoing: broadcast,
-          socket: ws.data,
-        });
-
-        if (!broadcast || broadcast === DUPLICATE_EVENT) return;
-
-        websocketServer.publish(
-          `game-id-${ws.data.gameID}`,
-          JSON.stringify(broadcast),
-        );
+        if (duplicateEvent) {
+          console.log("[Duplicate Event]", { event });
+        }
       } catch (err) {
         console.error("Something went wrong err", err);
       }
@@ -75,3 +70,11 @@ const websocketServer = Bun.serve<WebSocketData>({
 });
 
 console.log(`Websocket server running on port: ${websocketServer.port}`);
+EVENT_BUS.on(
+  BROADCASE_EVENT,
+  function broadcastEvent(payload: { gameID: number; event: GameEvent }) {
+    const data = JSON.stringify(payload.event);
+
+    websocketServer.publish(`game-id-${payload.gameID}`, data);
+  },
+);

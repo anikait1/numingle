@@ -65,25 +65,29 @@ export function process(
       type: GameEventType.FINISHED,
       data: {
         summary:
-          new Set(Object.values(event.data.player_scores)).size === 1
+          new Set(
+            Object.values(event.data.player_game_data).map(
+              (data) => data.score,
+            ),
+          ).size === 1
             ? {
                 status: "draw" as const,
                 players: Object.fromEntries(
-                  Object.entries(event.data.player_scores).map(
-                    ([id, score]) => [id, { score }],
+                  Object.entries(event.data.player_game_data).map(
+                    ([id, { score }]) => [id, { score }],
                   ),
                 ),
               }
             : {
                 status: "result" as const,
                 players: Object.fromEntries(
-                  Object.entries(event.data.player_scores).map(
-                    ([id, score]) => [id, { score }],
+                  Object.entries(event.data.player_game_data).map(
+                    ([id, { score }]) => [id, { score }],
                   ),
                 ),
                 winner: Number(
-                  Object.entries(event.data.player_scores).reduce((a, b) =>
-                    a[1] > b[1] ? a : b,
+                  Object.entries(event.data.player_game_data).reduce((a, b) =>
+                    a[1].score > b[1].score ? a : b,
                   )[0],
                 ),
                 reason: "score",

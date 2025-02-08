@@ -52,7 +52,15 @@ export function process(
     .all();
 
   if (playerJoinedEvents.length === REQUIRED_PLAYER_COUNT_TO_START_GAME)
-    return { type: GameEventType.STARTED, data: {} };
+    return {
+      type: GameEventType.STARTED,
+      data: {
+        player_ids: playerJoinedEvents.map(
+          (joinEvent) =>
+            (joinEvent.payload as PlayerJoinedEvent["data"]).player_id,
+        ),
+      },
+    };
 
   return null;
 }

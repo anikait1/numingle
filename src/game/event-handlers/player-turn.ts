@@ -117,8 +117,11 @@ export function process(
     (event) => event.type === GameEventType.TURN_COMPLETE,
   )?.payload ?? {
     turn_id: 0,
-    player_scores: Object.fromEntries(
-      currentTurnEvents.map((turnEvent) => [turnEvent.player_id, 0]),
+    player_game_data: Object.fromEntries(
+      currentTurnEvents.map((turnEvent) => [
+        turnEvent.player_id,
+        { score: 0, selection: 0 },
+      ]),
     ),
   }) as GameTurnCompleteEvent["data"];
 
@@ -126,11 +129,15 @@ export function process(
     type: GameEventType.TURN_COMPLETE,
     data: {
       turn_id: event.data.turn_id,
-      player_scores: Object.fromEntries(
+      player_game_data: Object.fromEntries(
         currentTurnEvents.map((turnEvent) => [
-          turnEvent.player_id,
-          previousTurnCompleteEvent.player_scores[turnEvent.player_id] +
-            turnEvent.selection,
+          turnEvent.player_id.toString(),
+          {
+            score:
+              previousTurnCompleteEvent.player_game_data[turnEvent.player_id]
+                .score + turnEvent.selection,
+            selection: turnEvent.selection,
+          },
         ]),
       ),
     },
