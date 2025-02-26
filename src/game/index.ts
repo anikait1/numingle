@@ -2,12 +2,9 @@ import type { DbTransaction } from "../database/db";
 import * as PlayerJoinedEventHandler from "./event-handlers/player-joined";
 import * as PlayerTurnEventHandler from "./event-handlers/player-turn";
 import * as GameTurnCompleteEventHandler from "./event-handlers/turn-complete";
-import { gameEventTable, gameTable } from "../database/schema";
+import { gameEventTable } from "../database/schema";
 import {
-  GameAlreadyStartedError,
-  GameNotFoundError,
-  PlayerAlreadyInGameError,
-  TurnExpiredError,
+  TurnExpiredError
 } from "./error";
 import {
   GameEventType,

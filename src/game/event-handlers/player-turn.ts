@@ -1,5 +1,5 @@
 import type { DbTransaction } from "../../database/db";
-import { gameEventTable, gameTable } from "../../database/schema";
+import { gameEventTable } from "../../database/schema";
 import { GameEventOutOfOrderError } from "../error";
 import { and, sql, eq, inArray, desc, count, or } from "drizzle-orm";
 import {

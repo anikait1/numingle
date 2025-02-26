@@ -3,10 +3,7 @@ import {
   sqliteTable,
   text,
   integer,
-  index,
-  primaryKey,
-  unique,
-  uniqueIndex,
+  index, uniqueIndex
 } from "drizzle-orm/sqlite-core";
 
 export const userTable = sqliteTable("users", {
