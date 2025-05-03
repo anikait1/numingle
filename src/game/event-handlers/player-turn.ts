@@ -8,6 +8,7 @@ import {
   type GameTurnStartedEvent,
   type PlayerTurnEvent,
 } from "../schema";
+import type { GameEventHandler } from "./types";
 
 const LAST_SUPPORTED_EVENTS: GameEventType[] = [
   GameEventType.PLAYER_TURN,
@@ -27,7 +28,7 @@ const LAST_SUPPORTED_EVENTS: GameEventType[] = [
 export function validate(
   txn: DbTransaction,
   gameID: number,
-  event: PlayerTurnEvent,
+  event: PlayerTurnEvent
 ) {
   const lastEvents = txn
     .select()
@@ -35,8 +36,8 @@ export function validate(
     .where(
       and(
         eq(gameEventTable.gameID, gameID),
-        inArray(gameEventTable.type, LAST_SUPPORTED_EVENTS),
-      ),
+        inArray(gameEventTable.type, LAST_SUPPORTED_EVENTS)
+      )
     )
     .orderBy(desc(gameEventTable.createdAt))
     .all();
@@ -46,11 +47,11 @@ export function validate(
 
   // TODO - add logic for turn expiry and error for invalid selection
   const turnStarted = lastEvents.find(
-    (lastEvent) => lastEvent.type === GameEventType.TURN_STARTED,
+    (lastEvent) => lastEvent.type === GameEventType.TURN_STARTED
   )?.payload as GameTurnStartedEvent["data"];
   if (
     turnStarted.unavailable_selections[event.data.player_id].includes(
-      event.data.selection,
+      event.data.selection
     )
   ) {
     throw new Error();
@@ -62,15 +63,15 @@ export function validate(
 export function process(
   txn: DbTransaction,
   gameID: number,
-  event: PlayerTurnEvent,
+  event: PlayerTurnEvent
 ): GameTurnCompleteEvent | null {
   const eventCounts = txn
     .select({
       playerJoinedEventCount: count(
-        sql`case when ${gameEventTable.type} = ${GameEventType.PLAYER_JOINED} then 1 end`,
+        sql`case when ${gameEventTable.type} = ${GameEventType.PLAYER_JOINED} then 1 end`
       ),
       playerTurnEventCount: count(
-        sql`case when ${gameEventTable.type} = ${GameEventType.PLAYER_TURN} and json_extract(${gameEventTable.payload}, '$.turn_id') = ${event.data.turn_id} then 1 end`,
+        sql`case when ${gameEventTable.type} = ${GameEventType.PLAYER_TURN} and json_extract(${gameEventTable.payload}, '$.turn_id') = ${event.data.turn_id} then 1 end`
       ),
     })
     .from(gameEventTable)
@@ -100,18 +101,18 @@ export function process(
             eq(gameEventTable.type, GameEventType.TURN_COMPLETE),
             eq(
               sql`json_extract(${gameEventTable.payload}, '$.turn_id')`,
-              event.data.turn_id - 1,
-            ),
+              event.data.turn_id - 1
+            )
           ),
           and(
             eq(gameEventTable.type, GameEventType.PLAYER_TURN),
             eq(
               sql`json_extract(${gameEventTable.payload}, '$.turn_id')`,
-              event.data.turn_id,
-            ),
-          ),
-        ),
-      ),
+              event.data.turn_id
+            )
+          )
+        )
+      )
     )
     .all();
 
@@ -125,14 +126,14 @@ export function process(
    * and previous scores would be zero
    */
   const previousTurnCompleteEvent = (events.find(
-    (event) => event.type === GameEventType.TURN_COMPLETE,
+    (event) => event.type === GameEventType.TURN_COMPLETE
   )?.payload ?? {
     turn_id: 0,
     player_game_data: Object.fromEntries(
       currentTurnEvents.map((turnEvent) => [
         turnEvent.player_id,
         { score: 0, selection: 0 },
-      ]),
+      ])
     ),
   }) as GameTurnCompleteEvent["data"];
 
@@ -149,8 +150,28 @@ export function process(
                 .score + turnEvent.selection,
             selection: turnEvent.selection,
           },
-        ]),
+        ])
       ),
     },
   };
 }
+
+class PlayerTurnEventHandler implements GameEventHandler<PlayerTurnEvent> {
+  validate(txn: DbTransaction, gameID: number, event: PlayerTurnEvent): string {
+    return validate(txn, gameID, event);
+  }
+
+  process(
+    txn: DbTransaction,
+    gameID: number,
+    event: PlayerTurnEvent
+  ): GameTurnCompleteEvent | null {
+    return process(txn, gameID, event);
+  }
+
+  broadcastType(): null {
+    return null;
+  }
+}
+
+export const Handler = new PlayerTurnEventHandler();

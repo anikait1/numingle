@@ -1,135 +1,135 @@
 import type { DbTransaction } from "../database/db";
 import * as PlayerJoinedEventHandler from "./event-handlers/player-joined";
 import * as PlayerTurnEventHandler from "./event-handlers/player-turn";
-import * as GameTurnCompleteEventHandler from "./event-handlers/turn-complete";
 import { gameEventTable } from "../database/schema";
-import {
-  TurnExpiredError
-} from "./error";
+import { TurnExpiredError } from "./error";
 import {
   GameEventType,
   type GameEvent,
+  type GameCreatedEvent,
+  type GameStartedEvent,
+  type PlayerJoinedEvent,
+  type PlayerTurnEvent,
+  type GameTurnCompleteEvent,
   type GameTurnStartedEvent,
+  type GameFinishedEvent,
 } from "./schema";
 
+import * as GameCreatedEventHandler from "./event-handlers/game-created";
+import * as GameStartedEventHandler from "./event-handlers/game-started";
+import * as TurnStartedEventHandler from "./event-handlers/turn-started";
+import * as GameFinishedEventHandler from "./event-handlers/game-finished";
+import * as TurnCompleteEventHandler from "./event-handlers/turn-complete";
+
 import EventEmitter from "node:events";
+import {
+  BROADCAST_EVENT,
+  DIRECT_EVENT,
+  DUPLICATE_EVENT,
+  type DuplicateEventType,
+  type GameEventHandler,
+} from "./event-handlers/types";
+
+class EventHandlerRegistry {
+  private handlers: Map<GameEventType, GameEventHandler<GameEvent>> = new Map();
+
+  register<T extends GameEvent>(
+    type: GameEventType,
+    handler: GameEventHandler<T>
+  ) {
+    this.handlers.set(type, handler as GameEventHandler<GameEvent>);
+  }
+
+  get<T extends GameEvent>(
+    type: GameEventType
+  ): GameEventHandler<T> | undefined {
+    return this.handlers.get(type) as GameEventHandler<T> | undefined;
+  }
+}
+
+const eventHandlers = new EventHandlerRegistry();
+eventHandlers.register<GameCreatedEvent>(
+  GameEventType.CREATED,
+  GameCreatedEventHandler.Handler
+);
+eventHandlers.register<PlayerJoinedEvent>(
+  GameEventType.PLAYER_JOINED,
+  PlayerJoinedEventHandler.Handler
+);
+eventHandlers.register<GameStartedEvent>(
+  GameEventType.STARTED,
+  GameStartedEventHandler.Handler
+);
+eventHandlers.register<GameTurnStartedEvent>(
+  GameEventType.TURN_STARTED,
+  TurnStartedEventHandler.Handler
+);
+eventHandlers.register<PlayerTurnEvent>(
+  GameEventType.PLAYER_TURN,
+  PlayerTurnEventHandler.Handler
+);
+eventHandlers.register<GameTurnCompleteEvent>(
+  GameEventType.TURN_COMPLETE,
+  TurnCompleteEventHandler.Handler
+);
+eventHandlers.register<GameFinishedEvent>(
+  GameEventType.FINISHED,
+  GameFinishedEventHandler.Handler
+);
 
 export function handleEvent(
   txn: DbTransaction,
   gameID: number,
-  event: GameEvent,
+  event: GameEvent
 ): DuplicateEventType | void {
-  switch (event.type) {
-    case GameEventType.CREATED: {
-      if (!saveEvent(txn, gameID, event, `${gameID}-${event.type}`))
-        return DUPLICATE_EVENT;
-      return;
-    }
+  const handler = eventHandlers.get(event.type);
+  if (!handler) {
+    throw new Error(`No handler registered for event type: ${event.type}`);
+  }
 
-    case GameEventType.PLAYER_JOINED: {
-      const hash = PlayerJoinedEventHandler.validate(txn, gameID, event);
-      if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
+  try {
+    const eventKey = handler.validate(txn, gameID, event);
+    if (!saveEvent(txn, gameID, event, eventKey)) return DUPLICATE_EVENT;
 
-      const nextEvent = PlayerJoinedEventHandler.process(txn, gameID, event);
-      if (!nextEvent) return;
-
-      return handleEvent(txn, gameID, nextEvent);
-    }
-
-    case GameEventType.STARTED: {
-      if (!saveEvent(txn, gameID, event, `${gameID}-${event.type}`))
-        return DUPLICATE_EVENT;
-
-      EVENT_BUS.emit(BROADCAST_EVENT, { gameID, event });
-      const nextEvent: GameTurnStartedEvent = {
-        type: GameEventType.TURN_STARTED,
-        data: {
-          turn_id: 1,
-          expiry: Math.floor(Date.now() / 1000) + 1,
-          unavailable_selections: Object.fromEntries(
-            event.data.player_ids.map((player_id) => [player_id, []]),
-          ),
-        },
-      };
-
-      return handleEvent(txn, gameID, nextEvent);
-    }
-
-    case GameEventType.TURN_STARTED: {
-      /**
-       * Currently this event is fired internally only,
-       * so no need to validate and process it. Simply
-       * storing it should be enough.
-       */
-      if (
-        !saveEvent(
-          txn,
-          gameID,
-          event,
-          `${gameID}-${event.type}-${event.data.turn_id}`,
-        )
-      )
-        return DUPLICATE_EVENT;
-
-      EVENT_BUS.emit(DIRECT_EVENT, { gameID, event });
-      return;
-    }
-
-    case GameEventType.PLAYER_TURN: {
-      try {
-        const hash = PlayerTurnEventHandler.validate(txn, gameID, event);
-        if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
-
-        const nextEvent = PlayerTurnEventHandler.process(txn, gameID, event);
-        if (!nextEvent) return;
-
-        return handleEvent(txn, gameID, nextEvent);
-      } catch (err) {
-        if (!(err instanceof TurnExpiredError)) throw err;
-
-        return handleEvent(txn, gameID, {
-          type: GameEventType.TURN_EXPIRED,
-          data: { turn_id: event.data.turn_id },
-        });
+    const broadcastType = handler.broadcastType();
+    switch (broadcastType) {
+      case BROADCAST_EVENT: {
+        EVENT_BUS.emit(BROADCAST_EVENT, { gameID, event });
+        break;
+      }
+      case DIRECT_EVENT: {
+        EVENT_BUS.emit(DIRECT_EVENT, { gameID, event });
+        break;
+      }
+      case null: {
+        break;
       }
     }
 
-    case GameEventType.TURN_COMPLETE: {
-      const hash = GameTurnCompleteEventHandler.validate(txn, gameID, event);
-      if (!saveEvent(txn, gameID, event, hash)) return DUPLICATE_EVENT;
-
-      EVENT_BUS.emit(BROADCAST_EVENT, { gameID, event });
-      const nextEvent = GameTurnCompleteEventHandler.process(
-        txn,
-        gameID,
-        event,
-      );
-      if (!nextEvent) return;
-
+    const nextEvent = handler.process(txn, gameID, event);
+    if (nextEvent) {
       return handleEvent(txn, gameID, nextEvent);
     }
-
-    case GameEventType.TURN_EXPIRED: {
-      break;
+  } catch (err) {
+    if (err instanceof TurnExpiredError) {
+      const turnId = "turn_id" in event.data ? event.data.turn_id : undefined;
+      if (turnId === undefined) {
+        throw new Error("Turn ID not found in event data");
+      }
+      return handleEvent(txn, gameID, {
+        type: GameEventType.TURN_EXPIRED,
+        data: { turn_id: turnId },
+      });
     }
-
-    case GameEventType.FINISHED: {
-      if (!saveEvent(txn, gameID, event, `${gameID}-${event.type}`))
-        return DUPLICATE_EVENT;
-
-      EVENT_BUS.emit(BROADCAST_EVENT, { gameID, event });
-      return;
-    }
+    throw err;
   }
-
-  throw new Error();
 }
 
 export function saveEvent(
   txn: DbTransaction,
   gameID: number,
   event: GameEvent,
-  toHash: string,
+  key: string
 ): typeof gameEventTable.$inferSelect | undefined {
   return txn
     .insert(gameEventTable)
@@ -137,16 +137,11 @@ export function saveEvent(
       gameID,
       type: event.type,
       payload: event.data,
-      hash: Bun.hash(toHash).toString(),
+      eventKey: key,
     })
     .onConflictDoNothing()
     .returning()
     .get();
 }
-
-export const DUPLICATE_EVENT = Symbol("duplicate-event");
-export const BROADCAST_EVENT = Symbol("broadcast-event");
-export const DIRECT_EVENT = Symbol("direct-event");
-type DuplicateEventType = typeof DUPLICATE_EVENT;
 
 export const EVENT_BUS = new EventEmitter();

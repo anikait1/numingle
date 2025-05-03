@@ -23,12 +23,10 @@ export const GameEventType = {
 } as const;
 export type GameEventType = (typeof GameEventType)[keyof typeof GameEventType];
 
-// Player Score Schema
 const PlayerScoreSchema = object({
   score: number(),
 });
 
-// Event Schemas
 export const GameCreatedEventSchema = object({
   type: literal(GameEventType.CREATED),
   data: object({
@@ -85,7 +83,7 @@ export const GameTurnCompleteEventSchema = object({
       object({
         score: number(),
         selection: number(),
-      }),
+      })
     ),
   }),
 });
@@ -124,7 +122,6 @@ export const GameAbandonedEventSchema = object({
   }),
 });
 
-// Combined Game Event Schema
 export const GameEventSchema = union([
   GameCreatedEventSchema,
   GameStartedEventSchema,
@@ -138,7 +135,6 @@ export const GameEventSchema = union([
   GameAbandonedEventSchema,
 ]);
 
-// Type inference from schemas
 export type GameEvent = InferOutput<typeof GameEventSchema>;
 export type GameCreatedEvent = InferOutput<typeof GameCreatedEventSchema>;
 export type GameStartedEvent = InferOutput<typeof GameStartedEventSchema>;

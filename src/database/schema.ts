@@ -38,13 +38,13 @@ export const gameEventTable = sqliteTable(
       .references(() => gameTable.gameID),
     type: text("type").notNull(),
     payload: text("payload", { mode: "json" }).notNull(),
-    hash: text("hash").notNull(),
+    eventKey: text("event_key").notNull(),
     createdAt: integer("created_at")
       .notNull()
       .default(sql`(strftime('%s', 'now'))`),
   },
   (table) => [
     index("game_event_idx").on(table.gameID, table.type),
-    uniqueIndex("game_event_hash").on(table.hash),
+    uniqueIndex("game_event_key").on(table.eventKey),
   ],
 );

@@ -9,13 +9,14 @@ import {
   type GameTurnStartedEvent,
   type PlayerTurnEvent,
 } from "../schema";
+import type { GameEventHandler } from "./types";
 
 const LAST_SUPPORTED_EVENTS = [GameEventType.PLAYER_TURN];
 
 export function validate(
   txn: DbTransaction,
   gameID: number,
-  event: GameTurnCompleteEvent,
+  event: GameTurnCompleteEvent
 ) {
   const lastEvent = txn
     .select()
@@ -23,8 +24,8 @@ export function validate(
     .where(
       and(
         eq(gameEventTable.gameID, gameID),
-        inArray(gameEventTable.type, LAST_SUPPORTED_EVENTS),
-      ),
+        inArray(gameEventTable.type, LAST_SUPPORTED_EVENTS)
+      )
     );
 
   if (!lastEvent)
@@ -36,7 +37,7 @@ export function validate(
 export function process(
   txn: DbTransaction,
   gameID: number,
-  event: GameTurnCompleteEvent,
+  event: GameTurnCompleteEvent
 ): GameFinishedEvent | GameTurnStartedEvent {
   const playerTurns = txn
     .select()
@@ -47,9 +48,9 @@ export function process(
         eq(gameEventTable.type, GameEventType.PLAYER_TURN),
         eq(
           sql`json_extract(${gameEventTable.payload}, '$.turn_id')`,
-          event.data.turn_id,
-        ),
-      ),
+          event.data.turn_id
+        )
+      )
     )
     .all();
 
@@ -58,7 +59,7 @@ export function process(
   if (
     playerTurns.every(
       (turn) =>
-        (turn.payload as PlayerTurnEvent["data"]).selection === playerSelection,
+        (turn.payload as PlayerTurnEvent["data"]).selection === playerSelection
     )
   ) {
     return {
@@ -66,29 +67,27 @@ export function process(
       data: {
         summary:
           new Set(
-            Object.values(event.data.player_game_data).map(
-              (data) => data.score,
-            ),
+            Object.values(event.data.player_game_data).map((data) => data.score)
           ).size === 1
             ? {
                 status: "draw" as const,
                 players: Object.fromEntries(
                   Object.entries(event.data.player_game_data).map(
-                    ([id, { score }]) => [id, { score }],
-                  ),
+                    ([id, { score }]) => [id, { score }]
+                  )
                 ),
               }
             : {
                 status: "result" as const,
                 players: Object.fromEntries(
                   Object.entries(event.data.player_game_data).map(
-                    ([id, { score }]) => [id, { score }],
-                  ),
+                    ([id, { score }]) => [id, { score }]
+                  )
                 ),
                 winner: Number(
                   Object.entries(event.data.player_game_data).reduce((a, b) =>
-                    a[1].score > b[1].score ? a : b,
-                  )[0],
+                    a[1].score > b[1].score ? a : b
+                  )[0]
                 ),
                 reason: "score",
               },
@@ -108,15 +107,41 @@ export function process(
 
           const possibleNumbers = Array.from(
             { length: 9 },
-            (_, i) => i + 1,
+            (_, i) => i + 1
           ).filter((n) => n !== currentSelection);
           const randomNumbers = possibleNumbers
             .sort(() => Math.random() - 0.5)
             .slice(0, 2);
 
           return [playerData.player_id, [currentSelection, ...randomNumbers]];
-        }),
+        })
       ),
     },
   };
 }
+
+class TurnCompleteEventHandler
+  implements GameEventHandler<GameTurnCompleteEvent>
+{
+  validate(
+    txn: DbTransaction,
+    gameID: number,
+    event: GameTurnCompleteEvent
+  ): string {
+    return `${gameID}-${GameEventType.TURN_COMPLETE}-${event.data.turn_id}`;
+  }
+
+  process(
+    txn: DbTransaction,
+    gameID: number,
+    event: GameTurnCompleteEvent
+  ): GameFinishedEvent | GameTurnStartedEvent {
+    return process(txn, gameID, event);
+  }
+
+  broadcastType(): null {
+    return null;
+  }
+}
+
+export const Handler = new TurnCompleteEventHandler();

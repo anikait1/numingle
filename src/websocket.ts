@@ -1,12 +1,12 @@
 import { parse } from "valibot";
 import { GameEventSchema, GameEventType, type GameEvent } from "./game/schema";
 import {
-  BROADCAST_EVENT,
-  DIRECT_EVENT, EVENT_BUS,
+  EVENT_BUS,
   handleEvent
 } from "./game";
 import { db } from "./database/db";
 import { file, type ServerWebSocket } from "bun";
+import { BROADCAST_EVENT, DIRECT_EVENT } from "./game/event-handlers/types";
 
 type WebSocketData = {
   connectionID: string;
