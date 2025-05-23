@@ -19,6 +19,8 @@ export const userTable = sqliteTable("users", {
 
 export const gameTable = sqliteTable("games", {
   gameID: integer("game_id").primaryKey({ autoIncrement: true }),
+  // TODO - the status should be an enum
+  status: text("status", {mode: "json"}),
   summary: text("summary", { mode: "json" }),
   joinCode: text("join_code"),
   createdAt: integer("created_at", { mode: "timestamp" })
