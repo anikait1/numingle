@@ -1,5 +1,7 @@
-import { migrate } from "drizzle-orm/bun-sqlite/migrator";
-import { db } from "./db";
+import { resolve } from "node:path";
 
 // TODO - setup migration folder path
-migrate(db, { migrationsFolder: "" });
+const projectRoot = resolve(import.meta.dir, "../..");
+const MIGRATIONS_FOLDER = resolve(projectRoot, "drizzle");
+console.log(import.meta);
+// migrate(db, { migrationsFolder: "" });

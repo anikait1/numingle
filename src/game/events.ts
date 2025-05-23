@@ -58,7 +58,7 @@ export const GameTurnStartedEventSchema = object({
       pipe(string(), regex(/^\d+$/)),
       pipe(
         array(pipe(number(), toMinValue(1), toMaxValue(9))),
-        minLength(3),
+        minLength(0),
         maxLength(3)
       )
     ),

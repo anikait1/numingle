@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9fffc4a8-e149-4d11-a278-09b97f1d2374",
+  "id": "a2142ded-26c1-466e-93b0-a0b9d340a4de",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "game_events": {
@@ -35,8 +35,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "hash": {
-          "name": "hash",
+        "event_key": {
+          "name": "event_key",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -60,10 +60,10 @@
           ],
           "isUnique": false
         },
-        "game_event_hash": {
-          "name": "game_event_hash",
+        "game_event_key": {
+          "name": "game_event_key",
           "columns": [
-            "hash"
+            "event_key"
           ],
           "isUnique": true
         }
@@ -96,6 +96,13 @@
           "primaryKey": true,
           "notNull": true,
           "autoincrement": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "summary": {
           "name": "summary",

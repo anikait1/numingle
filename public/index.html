@@ -227,6 +227,7 @@
           movesHistory: [],
           fadeOutActive: false,
           unavailableSelections: [],
+          gameState: null,
 
           initGame() {
             window.addEventListener("beforeunload", () => {
@@ -242,151 +243,139 @@
               return;
             }
 
-            this.ws = new WebSocket(
-              `ws://localhost:3001?userID=${this.userId}&gameID=${this.gameId}`,
-            );
+            const wsUrl = `ws://localhost:3001?userID=${this.userId}&gameID=${this.gameId}`;
+            console.log('Connecting to WebSocket:', wsUrl);
+            
+            this.ws = new WebSocket(wsUrl);
 
             this.ws.onopen = () => {
               this.isConnected = true;
-              this.ws.send(
-                JSON.stringify({
-                  type: "player-joined",
-                  data: {
-                    player_id: parseInt(this.userId),
-                  },
-                }),
-              );
+              console.log("WebSocket connected successfully");
             };
 
-            this.ws.onmessage = (event) => this.handleMessage(event);
+            this.ws.onmessage = (event) => {
+              console.log("Raw message received:", event.data);
+              try {
+                const gameState = JSON.parse(event.data);
+                this.handleGameState(gameState);
+              } catch (error) {
+                console.error("Error parsing game state:", error);
+              }
+            };
 
             this.ws.onerror = (error) => {
               console.error("WebSocket error:", error);
               alert("Connection error occurred");
             };
 
-            this.ws.onclose = () => {
+            this.ws.onclose = (event) => {
+              console.log("WebSocket closed:", event.code, event.reason);
               alert("Connection closed");
               this.isConnected = false;
             };
           },
 
-          handleMessage(event) {
-            const message = JSON.parse(event.data);
-            console.log("Received message:", message);
+          handleGameState(gameState) {
+            console.log("Handling game state:", gameState);
+            this.gameState = gameState;
 
-            switch (message.type) {
-              case "game-started":
-                this.clearSelection();
-                this.gameStatus = "Game started! Pick a number.";
-                this.canSelect = true;
-                this.unavailableSelections = [];
-                break;
-
-              case "game-turn-started":
-                this.fadeOutActive = true;
-                setTimeout(() => {
-                  this.clearSelection();
-                  this.currentTurnId = message.data.turn_id;
-                  this.unavailableSelections = message.data.unavailable_selections[this.userId] || [];
-                  this.gameStatus = `Turn ${this.currentTurnId}: Pick a number!`;
-                  this.canSelect = true;
-                  this.fadeOutActive = false;
-                }, 2000);
-                break;
-
-              case "game-turn-complete":
-                this.handleTurnComplete(message.data);
-                break;
-
-              case "game-finished":
-                this.handleGameFinished(message.data.summary);
-                break;
+            // Update game status
+            if (gameState.status === "finished") {
+              this.handleGameFinished(gameState);
+            } else if (gameState.status === "started") {
+              this.handleGameStarted(gameState);
+            } else {
+              this.gameStatus = "Waiting for game to start...";
             }
           },
 
-          handleTurnComplete(data) {
-            const turnId = data.turn_id;
-            const playerGameData = data.player_game_data;
-
-            const moves = Object.entries(playerGameData).map(
-              ([playerId, data]) => ({
-                playerId: parseInt(playerId),
-                selection: data.selection,
-                score: data.score,
-              }),
-            );
-
-            this.movesHistory.unshift(
-              `Turn ${turnId}: ${moves
-                .map(
-                  (move) => `Player ${move.playerId} chose ${move.selection}`,
-                )
-                .join(" | ")}`,
-            );
-
-            moves.forEach((move) => {
-              if (move.playerId !== parseInt(this.userId)) {
-                this.opponentSelection = move.selection;
-              }
-            });
-
-            const scores = Object.fromEntries(
-              Object.entries(playerGameData).map(([playerId, data]) => [
-                playerId,
-                data.score,
-              ]),
-            );
-            this.updateScores(scores);
-
+          handleGameFinished(gameState) {
+            const players = Object.values(gameState.players);
+            const maxScore = Math.max(...players.map(p => p.score));
+            const winners = players.filter(p => p.score === maxScore);
+            
+            if (winners.length > 1) {
+              this.gameStatus = "Game Over - It's a draw!";
+            } else {
+              this.gameStatus = winners[0].id === parseInt(this.userId) 
+                ? "Game Over - You won!" 
+                : "Game Over - Opponent won!";
+            }
             this.canSelect = false;
-            this.gameStatus = "Showing results...";
+          },
+
+          handleGameStarted(gameState) {
+            const player = gameState.players[String(this.userId)];
+            if (!player) {
+              console.error("Player not found in game state");
+              return;
+            }
+
+            this.currentTurnId = gameState.currentTurn;
+            this.updateScores(gameState.players);
+            this.updateOpponentSelection(gameState.players);
+
+            if (player.lastMove !== 0) {
+              this.selectedNumber = player.lastMove;
+              this.canSelect = false;
+              this.gameStatus = "Waiting for other players...";
+            } else {
+              this.selectedNumber = null;
+              this.unavailableSelections = player.unavailableSelections || [];
+              this.canSelect = true;
+              this.gameStatus = `Turn ${gameState.currentTurn}: Pick a number!`;
+            }
+          },
+
+          updateScores(players) {
+            const userIdStr = String(this.userId);
+            this.yourScore = players[userIdStr]?.score || 0;
+            
+            const opponentId = Object.keys(players).find(id => id !== userIdStr);
+            this.opponentScore = opponentId ? (players[opponentId]?.score || 0) : 0;
+          },
+
+          updateOpponentSelection(players) {
+            const userIdStr = String(this.userId);
+            const opponentId = Object.keys(players).find(id => id !== userIdStr);
+            
+            if (opponentId && players[opponentId]?.lastMove !== 0) {
+              this.opponentSelection = players[opponentId].lastMove;
+            } else {
+              this.opponentSelection = null;
+            }
           },
 
           selectNumber(number) {
-            if (!this.currentTurnId || !this.canSelect || this.unavailableSelections.includes(number)) return;
+            if (!this.canSelect || this.selectedNumber !== null || this.unavailableSelections.includes(number)) {
+              return;
+            }
+
+            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+              alert('Connection lost. Please refresh the page.');
+              return;
+            }
 
             this.selectedNumber = number;
+            const payload = {
+              type: "player-turn",
+              data: {
+                player_id: parseInt(this.userId),
+                turn_id: this.currentTurnId,
+                selection: number,
+              },
+            };
 
-            this.ws.send(
-              JSON.stringify({
-                type: "player-turn",
-                data: {
-                  player_id: parseInt(this.userId),
-                  turn_id: this.currentTurnId,
-                  selection: number,
-                },
-              }),
-            );
-
-            this.canSelect = false;
-            this.gameStatus = "Waiting for opponent...";
-          },
-
-          updateScores(scores) {
-            this.yourScore = scores[this.userId] || 0;
-            const opponentId = Object.keys(scores).find(
-              (id) => parseInt(id) !== parseInt(this.userId),
-            );
-            this.opponentScore = opponentId ? scores[opponentId] : 0;
-          },
-
-          handleGameFinished(summary) {
-            if (summary.status === "draw") {
-              this.gameStatus = "Game Over - It's a draw!";
-            } else {
-              this.gameStatus =
-                summary.winner === parseInt(this.userId)
-                  ? "Game Over - You won!"
-                  : "Game Over - Opponent won!";
+            try {
+              this.ws.send(JSON.stringify(payload));
+              console.log('Move sent:', payload);
+              this.canSelect = false;
+              this.gameStatus = "Waiting for opponent...";
+            } catch (error) {
+              console.error('Error sending move:', error);
+              alert('Failed to send move. Please try again.');
             }
-            this.canSelect = false;
-          },
-
-          clearSelection() {
-            this.selectedNumber = null;
-            this.opponentSelection = null;
-          },
+          }
         }));
       });
     </script>

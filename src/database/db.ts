@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import * as schema from "./schema";
 
 const client = new Database(Bun.env.SQLITE_DB_FILENAME);
-export const db = drizzle(client, { schema, logger: true });
+export const db = drizzle(client, { schema, logger: false });
+
 export type DbType = typeof db;
 export type DbTransaction = Parameters<Parameters<DbType["transaction"]>[0]>[0];

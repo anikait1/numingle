@@ -41,6 +41,7 @@ export const gameEventTable = sqliteTable(
     type: text("type").notNull(),
     payload: text("payload", { mode: "json" }).notNull(),
     eventKey: text("event_key").notNull(),
+    // TODO - drop created_at column
     createdAt: integer("created_at")
       .notNull()
       .default(sql`(strftime('%s', 'now'))`),
