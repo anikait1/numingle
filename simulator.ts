@@ -1,6 +1,11 @@
 import { db } from "./src/database/db";
 import { userTable } from "./src/database/schema";
-import { GameEventType } from "./src/game/events";
+import {
+  GameEventType,
+  GameNotificationType,
+  type GameNotification,
+  type PlayerTurnEvent,
+} from "./src/game/events";
 import * as Game from "./src/game";
 import WebSocket from "ws";
 
@@ -29,7 +34,9 @@ function createUsers(numUsers: number): SimulatedUser[] {
   for (let i = 0; i < numUsers; i += BATCH_SIZE) {
     const batchSize = Math.min(BATCH_SIZE, numUsers - i);
     const batchUsers = Array.from({ length: batchSize }, (_, index) => ({
-      username: `sim_user_${i + index + 1}_${Math.random().toString(36).substring(2, 8)}`,
+      username: `sim_user_${i + index + 1}_${Math.random()
+        .toString(36)
+        .substring(2, 8)}`,
     }));
 
     const createdUsers = db
@@ -46,7 +53,9 @@ function createUsers(numUsers: number): SimulatedUser[] {
       }))
     );
 
-    console.log(`Created batch of ${batchSize} users (${users.length}/${numUsers} total)`);
+    console.log(
+      `Created batch of ${batchSize} users (${users.length}/${numUsers} total)`
+    );
   }
 
   console.log("Users created successfully!");
@@ -58,7 +67,9 @@ function createGames(numGames: number): SimulatedGame[] {
   const games: SimulatedGame[] = [];
 
   for (let i = 0; i < numGames; i++) {
-    const joinCode = `GAME${i + 1}_${Math.random().toString(36).substring(2, 8)}`;
+    const joinCode = `GAME${i + 1}_${Math.random()
+      .toString(36)
+      .substring(2, 8)}`;
 
     const game = db.transaction((txn) => {
       const created = Game.createGame(joinCode, txn);
@@ -95,16 +106,26 @@ function joinGames(games: SimulatedGame[], users: SimulatedUser[]): void {
     const user1 = availableUsers[0];
     const user2 = availableUsers[1];
 
-    db.transaction((txn) => {
+    game.gameState = db.transaction((txn) => {
       const g = Game.getGame(game.id, txn);
-      Game.handlePlayerJoinEvent(g, {
-        type: GameEventType.PLAYER_JOINED,
-        data: { player_id: user1.id },
-      }, txn);
-      Game.handlePlayerJoinEvent(g, {
-        type: GameEventType.PLAYER_JOINED,
-        data: { player_id: user2.id },
-      }, txn);
+      Game.handlePlayerJoinEvent(
+        g,
+        {
+          type: GameEventType.PLAYER_JOINED,
+          data: { player_id: user1.id },
+        },
+        txn
+      );
+      const updatedG = Game.handlePlayerJoinEvent(
+        g,
+        {
+          type: GameEventType.PLAYER_JOINED,
+          data: { player_id: user2.id },
+        },
+        txn
+      );
+
+      return updatedG.game;
     });
 
     game.users = [user1, user2];
@@ -121,88 +142,146 @@ function joinGames(games: SimulatedGame[], users: SimulatedUser[]): void {
 }
 
 async function connectUsersToGame(game: SimulatedGame): Promise<void> {
-  await Promise.all(game.users.map(user => {
-    return new Promise<void>((resolve) => {
-      const ws = new WebSocket(
-        `ws://localhost:3001?userID=${user.id}&gameID=${game.id}`
+  for (const user of game.users) {
+    const address = `ws://localhost:3001?userID=${user.id}&gameID=${game.id}`;
+    const ws = new WebSocket(address);
+
+    ws.on("open", function connectionOpenHandler() {
+      console.log(
+        `User(${user.id}) ${user.username} connected to game ${game.id}`
       );
-
-      ws.on("open", () => {
-        console.log(`User ${user.username} connected to game ${game.id}`);
-        resolve();
-      });
-
-      ws.on("message", (data) => {
-        try {
-          const parsed = JSON.parse(data.toString());
-          game.gameState = parsed;
-          if (parsed.status === Game.GameStatus.FINISHED) {
-            console.log(`Game ${game.id} finished`, parsed);
-          }
-        } catch (err) {
-          console.error("Bad game state from server:", data.toString());
-        }
-      });
-
-      user.ws = ws;
     });
-  }));
+
+    ws.on("message", function messageReceivedHandler(data) {
+      try {
+        const parsedData: {
+          game: Game.Game;
+          notifications: GameNotification[];
+        } = JSON.parse(data.toString());
+
+        game.gameState = parsedData.game;
+        console.log('event receieved', parsedData.notifications)
+
+        for (const notification of parsedData.notifications) {
+          switch (notification.type) {
+            case GameNotificationType.TURN_STARTED: {
+              const playerTurnEvent: PlayerTurnEvent = {
+                type: GameEventType.PLAYER_TURN,
+                data: {
+                  player_id: notification.data.player_id,
+                  selection: makePlayerSelection(
+                    parsedData.game,
+                    parsedData.game.players[notification.data.player_id]
+                  ),
+                  turn_id: notification.data.turn_id,
+                },
+              };
+
+              setTimeout(() => {
+                ws.send(JSON.stringify(playerTurnEvent));
+              }, 10 * Math.random());
+              break;
+            }
+            case GameNotificationType.GAME_FINISHED: {
+              console.log("closing connection", user.id, game.gameState.id);
+              ws.close();
+              break;
+            }
+            default: {
+              console.log("not handling noitification event", notification);
+            }
+          }
+        }
+      } catch (err) {
+        console.error(
+          "Something went wrong while handling message from server",
+          err,
+          data
+        );
+      }
+    });
+
+    user.ws = ws;
+  }
 }
 
-async function simulateGameTurns(game: SimulatedGame): Promise<void> {
-  while (game.gameState?.status === Game.GameStatus.STARTED) {
-    for (const user of game.users) {
-      const player = game.gameState.players[user.id];
-      if (!player || (player.lastMove && player.lastMove !== 0)) continue;
+function startSimulation(game: SimulatedGame) {
+  for (const user of game.users) {
+    if (!user.ws) continue;
 
-      const unavailable = player.unavailableSelections ?? [];
-      const available = [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(
-        n => !unavailable.includes(n)
-      );
+    const gameState = game.gameState;
+    if (!gameState || gameState.status !== Game.GameStatus.STARTED) continue;
 
-      if (available.length === 0) continue;
+    const playerTurnEvent = {
+      type: GameEventType.PLAYER_TURN,
+      data: {
+        player_id: user.id,
+        selection: makePlayerSelection(gameState, gameState.players[user.id]),
+        turn_id: gameState.currentTurn,
+      },
+    };
 
-      const choice = available[Math.floor(Math.random() * available.length)];
-      const turnEvent = {
-        type: "player-turn",
-        data: {
-          player_id: user.id,
-          turn_id: game.gameState.currentTurn,
-          selection: choice,
-        },
-      };
-
-      user.ws?.send(JSON.stringify(turnEvent));
-    }
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.random() * 500 + 100)
+    console.log(
+      "Kicking of player turn event for simulation",
+      playerTurnEvent,
+      user.ws.readyState
     );
+    user.ws.send(JSON.stringify(playerTurnEvent));
   }
 }
 
-async function cleanupGames(games: SimulatedGame[]): Promise<void> {
-  console.log("Cleaning up simulator...");
-  for (const game of games) {
-    for (const user of game.users) {
-      user.ws?.close();
-    }
-  }
-  console.log("Cleanup complete!");
+function makePlayerSelection(game: Game.Game, player: Game.Player) {
+  const unavailableSelections = player.unavailableSelections;
+  const availableSelections = [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(
+    (n) => !unavailableSelections.includes(n)
+  );
+
+  return availableSelections[
+    Math.floor(Math.random() * availableSelections.length)
+  ];
 }
 
-async function runSimulation(numUsers: number, numGames: number): Promise<void> {
+let games: SimulatedGame[];
+async function runSimulation(
+  numUsers: number,
+  numGames: number
+): Promise<void> {
   console.log("Starting simulator...");
 
+  games = createGames(numGames);
   const users = createUsers(numUsers);
-  const games = createGames(numGames);
   joinGames(games, users);
 
   console.log("Simulating...");
   await Promise.all(games.map(connectUsersToGame));
-  await Promise.all(games.map(simulateGameTurns));
-
-  await cleanupGames(games);
+  games.forEach((game) =>
+    setTimeout(() => {
+      startSimulation(game);
+    }, 1000 + Math.random() * 1000)
+  );
 }
 
-runSimulation(5000, 2500).catch(console.error);
+runSimulation(10_000, 5_000).catch(console.error);
+
+setTimeout(() => {
+  console.log({
+    log: "Game status log",
+    pending_games: games.filter(
+      (game) => game.gameState?.status !== Game.GameStatus.FINISHED
+    ).length,
+    over_games: games.filter(
+      (game) => game.gameState?.status === Game.GameStatus.FINISHED
+    ).length,
+  });
+  setInterval(() => {
+    console.log({
+      log: "Game status log",
+      pending_games: games.filter(
+        (game) => game.gameState?.status !== Game.GameStatus.FINISHED
+      ).length,
+      over_games: games.filter(
+        (game) => game.gameState?.status === Game.GameStatus.FINISHED
+      ).length,
+    });
+  }, 1000);
+}, 20_000);

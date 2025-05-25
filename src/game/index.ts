@@ -4,12 +4,16 @@ import { gameEventTable, gameTable } from "../database/schema";
 import {
   GameEventSchema,
   GameEventType,
+  GameNotificationType,
   type GameCreatedEvent,
   type GameEvent,
   type GameFinishedEvent,
+  type GameFinishedNotification,
+  type GameNotification,
   type GameStartedEvent,
   type GameTurnCompleteEvent,
   type GameTurnStartedEvent,
+  type GameTurnStartedNotification,
   type PlayerJoinedEvent,
   type PlayerTurnEvent,
 } from "./events";
@@ -62,7 +66,7 @@ export function handlePlayerTurnEvent(
   game: Game,
   event: PlayerTurnEvent,
   txn: DbTransaction
-) {
+): { game: Game; notifications: GameNotification[] } {
   /**
    * Ensure the following validations
    * 1. Game has started
@@ -82,17 +86,23 @@ export function handlePlayerTurnEvent(
   if (player.unavailableSelections.includes(event.data.selection))
     throw new Error("Cannot pick unavailable selection");
 
-  /** failure to store the event indicates a duplicate event, no need to process it again */
+  // TODO - handle the case of applied event already existing
+  // NOTE - most likely, just fetch all events and return the game state
   if (!saveEvent(game.id, event, txn)) {
-    return game;
+    console.log({
+      gameID: game.id,
+      event: event,
+    });
+    throw new Error("Not implemented");
   }
 
   applyEvent(game, event);
+
   const lastMoves = Object.values(game.players).map(
     (player) => player.lastMove
   );
   const turnComplete = lastMoves.every((move) => move !== 0);
-  if (!turnComplete) return game;
+  if (!turnComplete) return { game, notifications: [] };
 
   /**
    * Turn is complete, save the event and then decide what state should the game
@@ -160,7 +170,24 @@ export function handlePlayerTurnEvent(
     }
 
     applyEvent(game, nextTurnStartedEvent);
-    return game;
+
+    /**
+     * TURN_STARTED event contains information about unavailable selections
+     * of a player, these should not be made available to the user, therefore
+     * we need to emit one turn started event for each player
+     */
+    const turnStartedNotifications: GameTurnStartedNotification[] =
+      Object.values(game.players).map((player) => ({
+        type: GameNotificationType.TURN_STARTED,
+        data: {
+          game_id: game.id,
+          player_id: player.id,
+          turn_id: game.currentTurn,
+          unavailable_selections: player.unavailableSelections,
+        },
+      }));
+
+    return { game, notifications: turnStartedNotifications };
   }
 
   const scoreSummaryByPlayerID: Record<string, number> = {};
@@ -206,10 +233,22 @@ export function handlePlayerTurnEvent(
   }
 
   applyEvent(game, gameFinishedEvent);
-  return game;
+
+  const gameFinisehdNotification: GameFinishedNotification = {
+    type: GameNotificationType.GAME_FINISHED,
+    data: {
+      game_id: game.id,
+    },
+  };
+
+  return { game, notifications: [gameFinisehdNotification] };
 }
 
-export function handlePlayerJoinEvent(game: Game, event: PlayerJoinedEvent, txn: DbTransaction) {
+export function handlePlayerJoinEvent(
+  game: Game,
+  event: PlayerJoinedEvent,
+  txn: DbTransaction
+): { game: Game; notifications: GameNotification[] } {
   /**
    * Ensure the following validations
    * 1. Game has not started
@@ -218,8 +257,10 @@ export function handlePlayerJoinEvent(game: Game, event: PlayerJoinedEvent, txn:
    */
 
   if (game.status !== GameStatus.CREATED) throw new Error("Game not created");
-  if (Object.keys(game.players).length >= 2) throw new Error("Game already has enough players");
-  if (game.players[event.data.player_id]) throw new Error("Player already part of the game");
+  if (Object.keys(game.players).length >= 2)
+    throw new Error("Game already has enough players");
+  if (game.players[event.data.player_id])
+    throw new Error("Player already part of the game");
 
   if (!saveEvent(game.id, event, txn)) {
     console.log({
@@ -232,7 +273,7 @@ export function handlePlayerJoinEvent(game: Game, event: PlayerJoinedEvent, txn:
   applyEvent(game, event);
 
   if (Object.keys(game.players).length < 2) {
-    return game;
+    return { game, notifications: [] };
   }
 
   const gameStartedEvent: GameStartedEvent = {
@@ -255,10 +296,7 @@ export function handlePlayerJoinEvent(game: Game, event: PlayerJoinedEvent, txn:
     data: {
       turn_id: 1,
       unavailable_selections: Object.fromEntries(
-        Object.values(game.players).map((player) => [
-          `${player.id}`,
-          [],
-        ])
+        Object.values(game.players).map((player) => [`${player.id}`, []])
       ),
     },
   };
@@ -272,20 +310,49 @@ export function handlePlayerJoinEvent(game: Game, event: PlayerJoinedEvent, txn:
   }
 
   applyEvent(game, turnStartedEvent);
-  return game;
+
+  const notifications: GameNotification[] = [
+    {
+      type: GameNotificationType.PLAYER_JOINED,
+      data: {
+        game_id: game.id,
+        player_id: event.data.player_id,
+      },
+    },
+    {
+      type: GameNotificationType.GAME_STARTED,
+      data: {
+        game_id: game.id,
+      },
+    },
+    ...Object.values(game.players).map((player) => ({
+      type: GameNotificationType.TURN_STARTED,
+      data: {
+        game_id: game.id,
+        player_id: player.id,
+        turn_id: game.currentTurn,
+        unavailable_selections: player.unavailableSelections,
+      },
+    })),
+  ];
+  return { game, notifications };
 }
 
 export function createGame(joinCode: string, txn: DbTransaction) {
-  const gameTableRow = txn.insert(gameTable).values({
-    joinCode,
-    status: GameStatus.CREATED,
-  }).returning().get();
+  const gameTableRow = txn
+    .insert(gameTable)
+    .values({
+      joinCode,
+      status: GameStatus.CREATED,
+    })
+    .returning()
+    .get();
 
   const gameCreatedEvent: GameCreatedEvent = {
     type: GameEventType.CREATED,
     data: {
       id: gameTableRow.gameID,
-      joinCode,
+      join_code: joinCode,
     },
   };
 
